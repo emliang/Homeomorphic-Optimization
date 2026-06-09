@@ -1,0 +1,35 @@
+{
+  "ALM": {
+    "final_objective": 0.2839481830596924,
+    "final_violation": 0.0014212727546691895,
+    "iterations": 1000,
+    "last_trans_time": 0.0,
+    "mean_inner_iter_time": 0.0005887671839573159,
+    "mean_outer_iter_time": 0.0006947712429737294,
+    "record_path": "artifacts/records/ALM.npy",
+    "total_inner_iter_time": 0.5887671839573159,
+    "total_iter_time": 0.6947712429737294,
+    "total_outer_iter_time": 0.6947712429737294,
+    "total_wall_time": 0.7701004999998986
+  },
+  "Hom-PGD": {
+    "final_objective": 0.030885731801390648,
+    "final_transform_time": 4.158299998380244e-05,
+    "final_violation": 0.0,
+    "initial_transform_time": 0.0003365419997862773,
+    "iterations": 590,
+    "last_trans_time": 4.158299998380244e-05,
+    "record_path": "artifacts/records/Hom-PGD.npy",
+    "total_iter_time": 0.07952953397580131,
+    "total_wall_time": 0.13700779200007673
+  },
+  "PGD": {
+    "final_objective": 0.28419697284698486,
+    "final_violation": 0.0002319812774658203,
+    "iterations": 1000,
+    "last_trans_time": 0.0,
+    "record_path": "artifacts/records/PGD.npy",
+    "total_iter_time": 3.026190668993877,
+    "total_wall_time": 3.0810773339999287
+  }
+}

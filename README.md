@@ -315,11 +315,19 @@ be treated as evolving.
 
 ## Citation
 
-If this repository supports your research, cite the associated paper or project
-artifact once it is available. A formal `CITATION.cff` can be added when the
-public citation target is finalized.
+If this repository supports your research, please cite:
+
+```bibtex
+@inproceedings{
+liu2026fast,
+title={Fast Projection-Free Approach (without Optimization Oracle) for Optimization over Compact Convex Set},
+author={Chenghao Liu and Enming Liang and Minghua Chen},
+booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
+year={2026},
+url={https://openreview.net/forum?id=bP5cU0OYSn}
+}
+```
 
 ## License
 
-No open-source license is included yet. Until a license is added, treat the
-code as private research code rather than redistributable open-source software.
+This project is released under the MIT License. See `LICENSE` for details.

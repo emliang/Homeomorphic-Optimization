@@ -1,0 +1,8 @@
+numpy
+torch
+tqdm
+cvxpy
+matplotlib
+pandas
+seaborn
+torchvision
