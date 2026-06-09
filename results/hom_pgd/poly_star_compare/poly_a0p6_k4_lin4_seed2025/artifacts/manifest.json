@@ -1,0 +1,14 @@
+{
+  "algorithms": [
+    "PGD",
+    "Hom-PGD"
+  ],
+  "metadata": {
+    "problem_family": "toy_poly"
+  },
+  "records": {
+    "Hom-PGD": "artifacts/records/Hom-PGD.npy",
+    "PGD": "artifacts/records/PGD.npy"
+  },
+  "version": 1
+}

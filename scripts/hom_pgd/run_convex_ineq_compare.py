@@ -29,10 +29,10 @@ BASE_PARAMS = {
     **RUNTIME_SETTINGS,
     # Problem family and algorithms.
     "problem_type": "socp",
-    "algorithms": ["PGD", "FW", "ALM", "RD", "Hom-PGD"],
+    "algorithms": ["ALM", "RD", "Hom-PGD"],
     # Problem setup.
     "seed": 2025,
-    "n_var": 10,
+    "n_var": 100,
     "n_linear_cons": 0,
     "n_soc_cons": 10,
     "n_qua_cons": 0,
@@ -41,7 +41,7 @@ BASE_PARAMS = {
     "x_lower": -5.0,
     "x_upper": 5.0,
     # Shared optimization schedule.
-    "max_iterations": 100000,
+    "max_iterations": 10000,
     "max_running_time": 600,
     "learning_rate": 1e-2,
     "stepsize_rule": "adaptive",
@@ -62,7 +62,7 @@ BASE_PARAMS = {
     "problem_config_overrides": {},
     "common_config": {
         "convergence_threshold": 1e-6,
-        "max_iterations": 100000,
+        "max_iterations": 10000,
         "max_running_time": 600,
         "opt": "gd",
         "warm_start": False,
@@ -85,8 +85,6 @@ BASE_PARAMS = {
             "linearization_outer_iterations": 10,
             "linearization_inner_iterations": 100,
         },
-        "ALM": {"learning_rate": 1e-3, "outer_iterations": 200, "inner_iterations": 100, "dual_learning_rate": 1e-2},
-        "RD": {"learning_rate": 1e-3},
         "Hom-PGD": {"learning_rate": 1e-3, "hom_p_norm": 2, "momentum": 0.99},
     },
 }
@@ -108,21 +106,21 @@ INSTANCE_OVERRIDES = [
         None,
         {
             "n_var": 10,
-            "n_soc_cons": 10,
+            "n_soc_cons": 5,
         },
     ),
     (
         None,
         {
             "n_var": 100,
-            "n_soc_cons": 100,
+            "n_soc_cons": 50,
         },
     ),
     (
         None,
         {
             "n_var": 1000,
-            "n_soc_cons": 1000,
+            "n_soc_cons": 500,
         },
     ),
 ]

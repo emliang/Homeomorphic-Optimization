@@ -29,7 +29,7 @@ BASE_PARAMS = {
     "n": 10,
     "alpha": 0.5,
     # Shared optimization schedule.
-    "max_iterations": 100000,
+    "max_iterations": 1000,
     "max_running_time": 600,
     "visualize": True,
     "visualize_only": False,

@@ -551,6 +551,7 @@ def draw_metric_convergence(
                 linestyle=":",
                 linewidth=PAPER_STYLE["reference_linewidth"],
                 alpha=0.72,
+                label=reference_label if reference_label and show_legend else None,
             )
             if reference_label:
                 ax.annotate(

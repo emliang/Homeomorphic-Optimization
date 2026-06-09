@@ -17,24 +17,24 @@ EXPERIMENT_NAME = "poly_star_compare"
 EXPERIMENT_FAMILY = script_family(__file__)
 BENCHMARK = poly_star_benchmark
 BASE_PARAMS = poly_star_base_params(
-    problem_type="star",
+    problem_type="poly",
     algorithms=["PGD", "Hom-PGD"],
     alpha=0.6,
-    max_iterations=1000,
+    max_iterations=10000,
     convergence_threshold=1e-5,
     momentum=0.0,
 )
 QUICK_OVERRIDES = {
     # Edit here first for routine experiments.
-    "device": "cpu",
+    # "device": "cpu",
     # "dtype": "float64",
     "seed": 2026,
     "problem_type": "star",
-    "max_iterations": 1000,
+    # "max_iterations": 100,
     "algorithms": ["Hom-PGD", "PGD", "ALM"],
-    "algorithm_config": {"Hom-PGD": {"learning_rate": 5e-3}, 
-                        "PGD": {"learning_rate": 5e-3}, 
-                        "ALM": {"learning_rate": 5e-3}},
+    "algorithm_config": {"Hom-PGD": {"learning_rate": 1e-2, "hom_p_norm": 2, "momentum": 0.0},
+                        "PGD": {"learning_rate": 1e-2},
+                        "ALM": {"learning_rate": 1e-2}},
 }
 PARAMS = merge_params(BASE_PARAMS, QUICK_OVERRIDES)
 PARAMS["result_label"] = poly_star_result_label(PARAMS)

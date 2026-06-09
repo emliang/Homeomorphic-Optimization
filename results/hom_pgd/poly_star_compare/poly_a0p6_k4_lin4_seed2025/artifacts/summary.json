@@ -1,0 +1,22 @@
+{
+  "Hom-PGD": {
+    "final_objective": -0.09404069185256958,
+    "final_transform_time": 0.00012191700079711154,
+    "final_violation": 0.0,
+    "initial_transform_time": 0.0004866250001214212,
+    "iterations": 2658,
+    "last_trans_time": 0.00012191700079711154,
+    "record_path": "artifacts/records/Hom-PGD.npy",
+    "total_iter_time": 0.32674208999560506,
+    "total_wall_time": 0.6928519159991993
+  },
+  "PGD": {
+    "final_objective": -0.11729715019464493,
+    "final_violation": 0.0,
+    "iterations": 281,
+    "last_trans_time": 0.0,
+    "record_path": "artifacts/records/PGD.npy",
+    "total_iter_time": 0.019013204971997766,
+    "total_wall_time": 0.042531334000159404
+  }
+}

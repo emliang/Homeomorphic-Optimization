@@ -139,15 +139,6 @@ It compares:
 ["PGD", "FW", "ALM", "RD", "Hom-PGD"]
 ```
 
-The Hom-PGD-specific default block is:
-
-```python
-"Hom-PGD": {
-    "learning_rate": 1e-3,
-    "hom_p_norm": 2,
-    "momentum": 0.99,
-}
-```
 
 Common controls include:
 
@@ -281,6 +272,10 @@ scripts/hom_pgd/  Hom-PGD experiment entrypoints
 docs/             Architecture and experiment documentation
 tests/            Regression and package-boundary tests
 ```
+
+The repository includes the full `homopt` package source so shared internals
+remain importable. The public-facing scripts and this README currently focus on
+Hom-PGD.
 
 ## Build from Source and Test
 

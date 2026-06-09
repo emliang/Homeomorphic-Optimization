@@ -163,16 +163,36 @@ def build_comparison_traces(problem, records, algorithms):
 
 
 def _json_safe_trace_payload(traces):
-    return {
-        method: {
+    payload = {}
+    for method, trace in traces.items():
+        method_payload = {
             "time": np.asarray(trace["time"], dtype=float).tolist(),
             "objective": np.asarray(trace["objective"], dtype=float).tolist(),
             "equality_violation": np.asarray(trace["equality_violation"], dtype=float).tolist(),
             "inequality_violation": np.asarray(trace["inequality_violation"], dtype=float).tolist(),
             "full_violation": np.asarray(trace["full_violation"], dtype=float).tolist(),
         }
-        for method, trace in traces.items()
-    }
+        if "objective_gap" in trace:
+            method_payload["objective_gap"] = np.asarray(trace["objective_gap"], dtype=float).tolist()
+        payload[method] = method_payload
+    return payload
+
+
+def _add_objective_gap_traces(traces, reference_objective):
+    if reference_objective is None:
+        return False
+    reference = float(reference_objective)
+    if not np.isfinite(reference):
+        return False
+    scale = abs(reference)
+    use_relative_gap = scale > 1e-12
+    for trace in traces.values():
+        objective = np.asarray(trace["objective"], dtype=float)
+        gap = np.abs(objective - reference)
+        if use_relative_gap:
+            gap = gap / scale
+        trace["objective_gap"] = gap
+    return use_relative_gap
 
 
 def _runtime_value(record):
@@ -279,6 +299,12 @@ def save_comparison_visualizations(
     artifact_dir = output_dir / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     traces = build_comparison_traces(problem, records, algorithms)
+    objective_gap_available = _add_objective_gap_traces(traces, reference_objective)
+    objective_gap_is_relative = bool(
+        objective_gap_available
+        and reference_objective is not None
+        and abs(float(reference_objective)) > 1e-12
+    )
     paths = {
         "runtime_summary": artifact_dir / f"{prefix}_runtime_summary.pdf",
         "metric_traces": artifact_dir / f"{prefix}_metric_traces.json",
@@ -294,6 +320,18 @@ def save_comparison_visualizations(
         show_legend=show_convergence_legend,
     )
     paths.update({f"objective_convergence_{name}": metric_path for name, metric_path in objective_paths.items()})
+    if objective_gap_available:
+        objective_gap_paths = plot_metric_convergence(
+            traces,
+            "objective_gap",
+            "Relative objective gap" if objective_gap_is_relative else "Objective gap",
+            artifact_dir / f"{prefix}_objective_gap_convergence.pdf",
+            method_labels=method_labels,
+            log_y=True,
+            y_min_clip=1e-12,
+            show_legend=show_convergence_legend,
+        )
+        paths.update({f"objective_gap_convergence_{name}": metric_path for name, metric_path in objective_gap_paths.items()})
     if include_equality_convergence is None:
         include_equality_convergence = problem_has_equalities(problem)
     if include_equality_convergence:

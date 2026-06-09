@@ -1,8 +1,12 @@
 numpy
 torch
 tqdm
+scipy
+networkx
 cvxpy
+pyomo
 matplotlib
 pandas
 seaborn
 torchvision
+pypower

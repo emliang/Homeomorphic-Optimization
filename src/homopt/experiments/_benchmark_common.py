@@ -834,6 +834,7 @@ def normalize_outer_common_config(outer_common, *, context="outer_common"):
     if not outer_common:
         return outer_common
     config = copy.deepcopy(outer_common)
+    _normalize_config_alias(config, alias="max_iterations", canonical="outer_iterations", context=context)
     _normalize_config_alias(config, alias="outer_learning_rate", canonical="learning_rate", context=context)
     _normalize_config_alias(config, alias="lr_decay", canonical="outer_lr_decay", context=context)
     _normalize_config_alias(config, alias="stepsize_rule", canonical="outer_stepsize_rule", context=context)
