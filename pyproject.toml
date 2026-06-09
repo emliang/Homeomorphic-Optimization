@@ -14,10 +14,6 @@ dependencies = [
   "torch",
 ]
 
-[project.scripts]
-homopt-run = "homopt.experiments.cli:main"
-homopt-main = "homopt.experiments.main:main"
-
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
