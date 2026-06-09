@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homopt"
+version = "0.1.0"
+description = "Homeomorphic optimization research framework"
+readme = "README.md"
+requires-python = ">=3.7"
+authors = [{ name = "HomOPT contributors" }]
+dependencies = [
+  "numpy",
+  "torch",
+]
+
+[project.scripts]
+homopt-run = "homopt.experiments.cli:main"
+homopt-main = "homopt.experiments.main:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+]
+research = [
+  "networkx",
+  "pypower",
+  "scipy",
+]
+solvers = [
+  "cvxpy",
+  "pyomo",
+]
+viz = [
+  "matplotlib",
+  "pandas",
+  "seaborn",
+]
+models = [
+  "torchvision",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

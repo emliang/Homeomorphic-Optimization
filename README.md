@@ -1,96 +1,166 @@
 # Homeomorphic Optimization
 
-A user-facing guide and Python package for understanding and running
-homeomorphic methods for constrained optimization.
+[![Package](https://img.shields.io/badge/package-homopt-blue)](#installation)
+[![Python](https://img.shields.io/badge/python-3.7%2B-blue)](#requirements)
+[![Focus](https://img.shields.io/badge/focus-Hom--PGD-green)](#hom-pgd)
+[![Status](https://img.shields.io/badge/status-research%20package-orange)](#status)
 
-Homeomorphic optimization turns constrained problems into easier search
-problems by optimizing in a latent space and mapping every latent iterate back
-to the feasible region. The main idea is simple:
+<p align="center">
+  <img src="Webpage/Hom.png" alt="Homeomorphic transformation intuition" width="900">
+</p>
 
-```text
-original constrained problem:       minimize f(x) subject to x in C
+Homeomorphic Optimization is a research package and user guide for constrained
+optimization with homeomorphic maps. The current public-facing focus is
+**Hom-PGD**: a projected-gradient-style method that optimizes in a latent space
+while a homeomorphic or gauge map keeps decision variables inside the target
+inequality-constrained feasible set.
 
-homeomorphic reformulation:         choose x = phi(z), where phi(z) is feasible
-                                    minimize f(phi(z)) over unconstrained z
-```
+The package is designed for users who want to understand the method, run the
+included experiments, and adapt the implementation to new inequality-constrained
+optimization problems.
 
-When the map `phi` is chosen well, optimization steps can move freely in
-latent coordinates while the corresponding decision variables remain feasible
-or much easier to repair.
+## Latest Documentation
 
-## What This Repository Is For
+Start with these files:
 
-This repository is for users who want to:
+- `README.md`: high-level package overview and Hom-PGD user guide.
+- `docs/architecture.md`: package structure and module responsibilities.
+- `docs/algorithm_notes.md`: active algorithm IDs and implementation notes.
+- `docs/reproduce_experiments.md`: current experiment entrypoints.
+- `docs/experiment_guide.md`: how experiment scripts are organized.
 
-- understand how homeomorphic maps help constrained optimization;
-- run reproducible experiments for Hom-PGD, Hom-ALM, INN-PGD, and baselines;
-- use the `homopt` package as a research framework for new constrained
-  optimization problems;
-- compare homeomorphic methods with projected-gradient, augmented-Lagrangian,
-  manifold, and solver-based baselines.
+## Supported Methods
 
-The package is organized around runnable examples and experiment scripts. You
-can start from a script, inspect the method configuration, and trace the call
-into the shared Python package under `src/homopt`.
+The current README documents **Hom-PGD** in detail.
 
-## Core Intuition
-
-Many optimization methods update a decision variable and then correct it:
-
-```text
-take a step -> violate constraints -> project or penalize -> repeat
-```
-
-Homeomorphic methods instead try to encode the feasible geometry directly:
-
-```text
-take a latent step -> map to feasible point -> evaluate objective -> repeat
-```
-
-This changes the role of constraints. Instead of being an after-the-fact
-correction, they become part of the parameterization of the search space.
-
-```mermaid
-flowchart LR
-    Z["latent variable z"] --> Phi["homeomorphic / gauge map phi"]
-    Phi --> X["feasible decision x = phi(z)"]
-    X --> F["objective and residual evaluation"]
-    F --> Update["optimizer update in latent space"]
-    Update --> Z
-```
-
-## Method Families
-
-| Family | Use When | Main Idea |
+| Method | Status in This README | Purpose |
 | --- | --- | --- |
-| `Hom-PGD` | Inequality constraints define a convex or star-shaped feasible set | Optimize in latent coordinates through a gauge or star map instead of repeatedly projecting in decision space. |
-| `Hom-ALM` | The problem has equalities plus explicit inequality constraints | Use a homeomorphic map for inequalities and an augmented-Lagrangian loop for equalities. |
-| `Prox-Hom-ALM` / `Hom-PALM` | Equality-constrained problems need stronger outer-loop stabilization | Add a proximal term to the Hom-ALM outer method. |
-| `INN-PGD` | The feasible map is learned for a parametric problem family | Train an invertible neural network and run projected or latent optimization through the learned map. |
-| Classical baselines | You need reference comparisons | Includes PGD, FW, RD, ALM, proximal penalty methods, Stiefel retraction baselines, CVXPY/Pyomo/IPOPT routes, and problem-specific solvers. |
+| `Hom-PGD` | Detailed | Inequality-constrained optimization through a latent-to-feasible map. |
+| `PGD` | Baseline | Project in decision space after gradient steps. |
+| `FW` | Baseline | Use a linearized subproblem for feasible descent. |
+| `RD` | Baseline | Radial-dual style comparison route. |
+| `ALM` | Baseline in selected comparisons | Penalty/dual baseline for constrained optimization. |
+| `Hom-ALM`, `INN-PGD`, learning post-processing | Not covered here yet | Present in the package, but intentionally omitted from this user page for now. |
 
-## Package Layout
+## Hom-PGD
+
+Hom-PGD targets problems of the form:
+
+$$
+\begin{aligned}
+\min_{x} \quad & f(x) \\
+\text{s.t.} \quad & x \in \mathcal{C}.
+\end{aligned}
+$$
+
+where $\mathcal{C}$ is an inequality-defined feasible set that can be represented by a
+homeomorphic, gauge, star-shaped, or related latent-to-decision map.
+
+Instead of iterating directly on $x$, Hom-PGD introduces a latent variable $z$
+and a map:
+
+$$
+x = \psi(z).
+$$
+
+The optimizer updates $z$, evaluates the objective through $x = \psi(z)$, and
+records the resulting feasible decision trajectory.
+
+<p align="center">
+  <img src="Webpage/Hom-PGD_framework.png" alt="PGD and Hom-PGD comparison framework" width="900">
+</p>
+
+The figure contrasts the two viewpoints. PGD works in the original decision
+space and must handle the feasible set $\mathcal{K}$ directly. Hom-PGD uses a
+homeomorphic mapping $\psi$ to move between the original decision variable $x$
+and a latent variable $z$, turning the objective into
+
+$$
+h(z) = f(\psi(z))
+$$
+
+and the feasible region into a simpler latent set
+
+$$
+\mathcal{B} = \psi^{-1}(\mathcal{K}).
+$$
+
+### Why Use Hom-PGD?
+
+Classical projected gradient methods follow this pattern:
+
+$$
+x_{k+1} =
+\Pi_{\mathcal{C}}\!\left(x_k - \eta \nabla f(x_k)\right).
+$$
+
+Hom-PGD changes the pattern:
+
+$$
+\begin{aligned}
+z_{k+1} &= z_k - \eta \nabla_z f(\psi(z_k)), \\
+x_{k+1} &= \psi(z_{k+1}).
+\end{aligned}
+$$
+
+This is useful when repeated projection is expensive, unstable, or less natural
+than parameterizing the feasible geometry directly.
+
+### What the Map Does
+
+The map $\psi$ is the main modeling object. In the current package it can encode
+several inequality geometries used by the Hom-PGD experiments:
+
+- convex SOCP-style feasible regions through gauge maps;
+- 2D polytope and star-shaped toy feasible sets;
+- MaxCut SDP-style comparison routes;
+- adversarial-attack feasible balls and related norm constraints.
+
+For a user, the important mental model is:
 
 ```text
-src/homopt/
-  problems/       Problem definitions: convex/SOCP, QCQP, Stiefel, JCC/OPF
-  mappings/       Gauge maps, star maps, and homeomorphic parameterizations
-  optim/          Optimizer loops and method dispatch
-  models/         INN models and flow components
-  learning/       Predictor and post-processing interfaces
-  solvers/        Exact, convex, manifold, and OPF solver wrappers
-  experiments/    Reproducible experiment workloads and result persistence
-  viz/            Plotting, trace normalization, and artifact helpers
-
-scripts/
-  hom_pgd/                Hom-PGD inequality experiments
-  hom_alm/                Hom-ALM equality plus inequality experiments
-  inn_pgd/                INN-PGD experiments
-  learning_postprocess/   Predictor plus post-processing experiments
-
-docs/             Architecture, algorithm notes, and reproduction guides
-tests/            Regression tests and package boundary checks
+problem:      defines f(x) and constraints
+map:          converts latent z into feasible or geometry-aware x
+optimizer:    updates z and records objective/violation traces
+experiment:   compares Hom-PGD against baselines under the same budget
 ```
+
+### Hom-PGD Configuration
+
+The main editable Hom-PGD SOCP script is:
+
+```text
+scripts/hom_pgd/run_convex_ineq_compare.py
+```
+
+It compares:
+
+```python
+["PGD", "FW", "ALM", "RD", "Hom-PGD"]
+```
+
+The Hom-PGD-specific default block is:
+
+```python
+"Hom-PGD": {
+    "learning_rate": 1e-3,
+    "hom_p_norm": 2,
+    "momentum": 0.99,
+}
+```
+
+Common controls include:
+
+| Parameter | Meaning |
+| --- | --- |
+| `learning_rate` | Latent-space step size. |
+| `stepsize_rule` | Step-size policy, such as `adaptive`, `constant`, or `diminish`. |
+| `hom_p_norm` | Norm used by the latent ball projection route. |
+| `momentum` | Momentum for the update backend when enabled. |
+| `max_iterations` | Maximum optimization iterations. |
+| `max_running_time` | Wall-clock budget for an experiment run. |
+| `visualize` | Whether to write plots and comparison artifacts. |
+| `visualize_only` | Reuse stored artifacts without rerunning the experiment. |
 
 ## Installation
 
@@ -102,41 +172,52 @@ cd Homeomorphic-Optimization
 pip install -e .
 ```
 
-For development and experiments:
+For development and experiment workflows:
 
 ```bash
 pip install -e .[dev,research,solvers,viz,models]
 ```
 
-The local research environment used by the project is a conda environment named
-`ML`:
+## Requirements
+
+Base package:
+
+- Python >= 3.7
+- NumPy
+- PyTorch
+
+Optional experiment groups:
+
+- `dev`: pytest
+- `research`: SciPy, NetworkX, power-system helpers
+- `solvers`: CVXPY and Pyomo routes
+- `viz`: Matplotlib, pandas, seaborn
+- `models`: torchvision and model-adjacent dependencies
+
+The local research environment used by this project is named `ML`:
 
 ```bash
 conda run --no-capture-output -n ML python -m pytest -q tests
 ```
 
-If you are only reading the tutorial or running lightweight examples, start
-with the base install. Solver-heavy experiments may require optional packages
-such as CVXPY, Pyomo, IPOPT, or power-system dependencies.
-
 ## Quick Start
 
-Run a small Hom-ALM comparison:
-
-```bash
-python scripts/hom_alm/run_convex_eq_compare.py
-```
-
-Run an inequality-only Hom-PGD comparison:
+Run the main Hom-PGD inequality comparison:
 
 ```bash
 python scripts/hom_pgd/run_convex_ineq_compare.py
 ```
 
-Run a QCQP INN-PGD experiment:
+Run the 2D poly/star-shaped feasible-set comparison:
 
 ```bash
-python scripts/inn_pgd/run_qcqp_inn_compare.py
+python scripts/hom_pgd/run_poly_star_compare.py
+```
+
+Run the MaxCut SDP Hom-PGD comparison:
+
+```bash
+python scripts/hom_pgd/run_maxcut_sdp_compare.py
 ```
 
 Run tests:
@@ -145,91 +226,92 @@ Run tests:
 python -m pytest -q tests
 ```
 
-Experiment scripts write results under `results/<family>/...`. A typical run
-stores:
+## Hom-PGD Experiment Scripts
 
-```text
-config.json      # run configuration
-result.json      # compact metrics and summary payload
-artifacts/       # traces, figures, records, and method-specific outputs
-```
-
-## Choosing a Starting Point
-
-| Goal | Start Here |
+| Script | Purpose |
 | --- | --- |
-| Learn the main idea | Read this README, then inspect `docs/algorithm_notes.md`. |
-| Understand the package structure | Read `docs/architecture.md`. |
-| Reproduce current experiments | Read `docs/reproduce_experiments.md`. |
-| Add a new problem type | Start from `src/homopt/problems/` and an existing experiment workload. |
-| Add a new optimizer | Start from `src/homopt/optim/dispatch.py` and the optimizer modules in `src/homopt/optim/`. |
-| Add a new experiment script | Follow the family structure under `scripts/`. |
-| Compare methods on one instance | Use Hom-PGD or Hom-ALM scripts and inspect stored `artifacts/records/`. |
-| Train or evaluate learned feasible maps | Use the INN-PGD scripts under `scripts/inn_pgd/`. |
+| `scripts/hom_pgd/run_convex_ineq_compare.py` | Main convex inequality/SOCP comparison. |
+| `scripts/hom_pgd/run_poly_star_compare.py` | 2D polytope, star-shaped, or intersection toy set. |
+| `scripts/hom_pgd/run_poly_star_ablation.py` | Sensitivity checks for the poly/star route. |
+| `scripts/hom_pgd/run_maxcut_sdp_compare.py` | MaxCut SDP-style Hom-PGD comparison. |
+| `scripts/hom_pgd/run_adversarial_attack.py` | Norm-constrained adversarial-attack workflow. |
 
-## Conceptual Map
+Each script is intentionally editable. The intended workflow is:
 
-Homeomorphic optimization in this package is built around three separations:
-
-1. **Problem**
-   Defines the objective, constraints, gradients, and reference solve when
-   available.
-
-2. **Map**
-   Converts a latent variable into a decision variable that respects the target
-   geometry, usually through a gauge, star, or learned invertible map.
-
-3. **Optimizer**
-   Updates the latent or decision variable, records traces, and exposes
-   comparable metrics across methods.
-
-This separation lets a user swap methods without rewriting the problem, and
-lets new experiments share a common result schema.
-
-## Main Experiments
-
-| Experiment | Script | Purpose |
-| --- | --- | --- |
-| Convex inequality comparison | `scripts/hom_pgd/run_convex_ineq_compare.py` | Compare Hom-PGD against first-order inequality baselines. |
-| Convex equality plus inequality comparison | `scripts/hom_alm/run_convex_eq_compare.py` | Compare Hom-ALM and ALM-style methods. |
-| Stiefel constrained subspace learning | `scripts/hom_alm/run_stiefel_eq_compare.py` | Compare Hom-ALM with manifold and solver baselines. |
-| QCQP INN-PGD | `scripts/inn_pgd/run_qcqp_inn_compare.py` | Train or load a learned feasible map and compare on QCQP instances. |
-| QCQP INN-PGD toy visualization | `scripts/inn_pgd/run_qcqp_inn_toy.py` | Inspect 2D trajectories and map behavior. |
-| JCC/OPF INN-PGD | `scripts/inn_pgd/run_jcc_opf_compare.py` | Compare INN-PGD and solver/penalty baselines on chance-constrained OPF. |
-| Predictor plus post-processing | `scripts/learning_postprocess/run_qcqp_predictor_postprocess.py` | Compare neural prediction with optimization-based repair. |
+1. Open the relevant `scripts/hom_pgd/run_*.py` file.
+2. Modify `BASE_PARAMS`, `QUICK_OVERRIDES`, or instance overrides.
+3. Run the script directly.
+4. Inspect the generated result folder under `results/hom_pgd/`.
 
 ## Result Artifacts
 
-Comparison workflows use a manifest-backed artifact layout:
+Experiment runs write compact summaries and method records under `results/`.
+A typical comparison contains:
 
 ```text
+config.json
+result.json
 artifacts/
   manifest.json
   summary.json
   records/
-    <method>.npy
+    Hom-PGD.npy
+    PGD.npy
+    ...
 ```
 
-Use `summary.json` for compact method-level metrics and `records/<method>.npy`
-for full iteration traces. Training caches, model checkpoints, and large local
-outputs should remain outside the lightweight result summaries intended for
-sharing.
+Use:
 
-## Documentation
+- `summary.json` for method-level metrics;
+- `records/<method>.npy` for full iteration traces;
+- generated figures for convergence, feasibility, and method comparisons.
 
-- `docs/architecture.md`: package structure and module responsibilities.
-- `docs/algorithm_notes.md`: method IDs, algorithm behavior, and active
-  configuration rules.
-- `docs/reproduce_experiments.md`: experiment map and reproduction workflow.
-- `docs/experiment_guide.md`: extension patterns for new experiments.
-- `docs/solver_notes.md`: solver routes and baseline compatibility.
+## Package Layout
+
+```text
+src/homopt/
+  problems/       Problem definitions
+  mappings/       Gauge, star, and homeomorphic maps
+  optim/          Optimizer loops and algorithm dispatch
+  experiments/    Reproducible workloads and result persistence
+  solvers/        Baseline solver wrappers
+  viz/            Plotting and artifact helpers
+
+scripts/hom_pgd/  Hom-PGD experiment entrypoints
+docs/             Architecture and experiment documentation
+tests/            Regression and package-boundary tests
+```
+
+## Build from Source and Test
+
+For local development:
+
+```bash
+pip install -e .[dev,research,solvers,viz,models]
+python -m pytest -q tests
+```
+
+For the project conda environment:
+
+```bash
+conda run --no-capture-output -n ML python -m pytest -q tests
+```
+
+## Roadmap
+
+This README currently focuses on Hom-PGD. Future user-facing documentation can
+add separate pages for:
+
+- Hom-ALM and proximal Hom-ALM;
+- INN-PGD and learned feasible maps;
+- neural prediction plus optimization-based post-processing;
+- solver-specific benchmark setup and reproducibility notes.
 
 ## Status
 
-This is a research package. The API is organized enough for reusable
-experiments, but method internals and experiment defaults may still change as
-the research code evolves. Prefer script-level reproducibility over assuming
-that every internal helper is stable.
+This is a research package. The Hom-PGD workflow is organized around editable
+experiment scripts and shared package modules, but the public API should still
+be treated as evolving.
 
 ## Citation
 
