@@ -19,15 +19,16 @@ The package is designed for users who want to understand the method, run the
 included experiments, and adapt the implementation to new inequality-constrained
 optimization problems.
 
-## Latest Documentation
+## Where to Start
 
-Start with these files:
+Start with these files and modules:
 
 - `README.md`: high-level package overview and Hom-PGD user guide.
-- `docs/architecture.md`: package structure and module responsibilities.
-- `docs/algorithm_notes.md`: active algorithm IDs and implementation notes.
-- `docs/reproduce_experiments.md`: current experiment entrypoints.
-- `docs/experiment_guide.md`: how experiment scripts are organized.
+- `scripts/hom_pgd/`: editable Hom-PGD experiment scripts.
+- `scripts/hom_pgd/_configs.py`: shared defaults for the Hom-PGD scripts.
+- `src/homopt/experiments/hom_pgd.py`: public Hom-PGD experiment entrypoints.
+- `src/homopt/experiments/benchmarks/`: benchmark implementations used by the scripts.
+- `src/homopt/experiments/common/`: shared configuration, recording, labeling, and comparison helpers.
 
 ## Supported Methods
 
@@ -133,6 +134,12 @@ The main editable Hom-PGD SOCP script is:
 scripts/hom_pgd/run_convex_ineq_compare.py
 ```
 
+Shared script defaults live in:
+
+```text
+scripts/hom_pgd/_configs.py
+```
+
 It compares:
 
 ```python
@@ -148,10 +155,15 @@ Common controls include:
 | `stepsize_rule` | Step-size policy, such as `adaptive`, `constant`, or `diminish`. |
 | `hom_p_norm` | Norm used by the latent ball projection route. |
 | `momentum` | Momentum for the update backend when enabled. |
-| `max_iterations` | Maximum optimization iterations. |
+| `max_iterations` | Shared iteration budget. For ALM-family methods this is aligned to the outer-loop budget. |
 | `max_running_time` | Wall-clock budget for an experiment run. |
+| `initial_point_mode` | Initial point policy; current Hom-PGD configs default to `gauge_center`. |
 | `visualize` | Whether to write plots and comparison artifacts. |
 | `visualize_only` | Reuse stored artifacts without rerunning the experiment. |
+
+Per-method overrides go under `algorithm_config`, while shared controls go under
+`common_config`. For routine experiments, edit `QUICK_OVERRIDES` in the target
+script first.
 
 ## Installation
 
@@ -185,12 +197,6 @@ Optional experiment groups:
 - `viz`: Matplotlib, pandas, seaborn
 - `models`: torchvision and model-adjacent dependencies
 
-The local research environment used by this project is named `ML`:
-
-```bash
-conda run --no-capture-output -n ML python -m pytest -q tests
-```
-
 ## Quick Start
 
 Run the main Hom-PGD inequality comparison:
@@ -211,19 +217,13 @@ Run the MaxCut SDP Hom-PGD comparison:
 python scripts/hom_pgd/run_maxcut_sdp_compare.py
 ```
 
-Run tests:
-
-```bash
-python -m pytest -q tests
-```
-
 ## Hom-PGD Experiment Scripts
 
 | Script | Purpose |
 | --- | --- |
+| `scripts/hom_pgd/_configs.py` | Shared defaults and run-label helpers for the Hom-PGD scripts. |
 | `scripts/hom_pgd/run_convex_ineq_compare.py` | Main convex inequality/SOCP comparison. |
 | `scripts/hom_pgd/run_poly_star_compare.py` | 2D polytope, star-shaped, or intersection toy set. |
-| `scripts/hom_pgd/run_poly_star_ablation.py` | Sensitivity checks for the poly/star route. |
 | `scripts/hom_pgd/run_maxcut_sdp_compare.py` | MaxCut SDP-style Hom-PGD comparison. |
 | `scripts/hom_pgd/run_adversarial_attack.py` | Norm-constrained adversarial-attack workflow. |
 
@@ -261,35 +261,42 @@ Use:
 
 ```text
 src/homopt/
-  problems/       Problem definitions
-  mappings/       Gauge, star, and homeomorphic maps
-  optim/          Optimizer loops and algorithm dispatch
-  experiments/    Reproducible workloads and result persistence
-  solvers/        Baseline solver wrappers
-  viz/            Plotting and artifact helpers
+  problems/                Problem definitions
+    convex/                Convex inequality, MaxCut, and toy-set problems
+    convex_parametric/     Parametric convex problem families
+    jcc/                   Joint chance-constrained problem families
+    qcqp/                  QCQP problem families
+    stiefel/               Stiefel-manifold equality problems
+  mappings/                Gauge, star, and homeomorphic maps
+    gauge/                 Gauge-map implementation and explicit derivatives
+  optim/                   Optimizer loops, ALM routes, and dispatch
+  experiments/             Reproducible workloads and result persistence
+    hom_pgd.py             Public Hom-PGD experiment entrypoints
+    benchmarks/            Benchmark implementations
+    common/                Shared experiment helpers
+    adversarial/           Adversarial-attack workflow
+  solvers/                 Baseline solver wrappers
+  viz/                     Plotting and artifact helpers
 
 scripts/hom_pgd/  Hom-PGD experiment entrypoints
-docs/             Architecture and experiment documentation
-tests/            Regression and package-boundary tests
 ```
 
 The repository includes the full `homopt` package source so shared internals
 remain importable. The public-facing scripts and this README currently focus on
 Hom-PGD.
 
-## Build from Source and Test
+## Build from Source
 
 For local development:
 
 ```bash
 pip install -e .[dev,research,solvers,viz,models]
-python -m pytest -q tests
 ```
 
-For the project conda environment:
+After installation, a quick import smoke check is:
 
 ```bash
-conda run --no-capture-output -n ML python -m pytest -q tests
+python -c "import homopt; from homopt.experiments.hom_pgd import convex_algorithm_comparison; print('homopt import OK')"
 ```
 
 ## Roadmap
@@ -318,7 +325,7 @@ the paper.
 
 ## Citation
 
-If this repository supports your research, please cite:
+If this repository supports your research, please cite the relevant work:
 
 ```bibtex
 @inproceedings{
@@ -328,6 +335,24 @@ author={Chenghao Liu and Enming Liang and Minghua Chen},
 booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
 year={2026},
 url={https://openreview.net/forum?id=bP5cU0OYSn}
+}
+
+@inproceedings{
+anonymous2026hompgd,
+title={Hom-{PGD}\${\textasciicircum}+\$: Fast Reparameterized Optimization over Non-convex Ball-Homeomorphic Set},
+author={Anonymous},
+booktitle={Forty-third International Conference on Machine Learning},
+year={2026},
+url={https://openreview.net/forum?id=cOKyRhR8uZ}
+}
+
+@inproceedings{
+li2026gauge,
+title={Gauge Flow Matching: Efficient Constrained Generative Modeling over General Convex Set and Beyond},
+author={Xinpeng Li and Enming Liang and Minghua Chen},
+booktitle={The Fourteenth International Conference on Learning Representations},
+year={2026},
+url={https://openreview.net/forum?id=vxq1OnaAMq}
 }
 ```
 
