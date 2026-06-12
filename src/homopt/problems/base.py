@@ -25,7 +25,7 @@ class ProblemInstance:
 
 @dataclass
 class ProblemInstanceBatch:
-    """Unified batch container shared by single-instance and parametric routes."""
+    """Batch of problem-instance input parameters and optional objective data."""
 
     family: str
     inputs: Any
@@ -47,11 +47,7 @@ class ProblemInstanceBatch:
 
 
 class BaseProblem(ABC):
-    """Unified interface for optimization problems.
-
-    Existing problem classes can implement only `objective_x` and `constraint_x`,
-    while adapters provide compatibility for legacy variants.
-    """
+    """Unified interface for deterministic optimization problems."""
 
     nvar: int
     n_constraints: int | None = None
@@ -68,7 +64,7 @@ class BaseProblem(ABC):
         """Return constraint violation(s) at x."""
 
     def objective(self, x):
-        """Compatibility alias for legacy code."""
+        """Convenience wrapper around objective_x."""
         return self.objective_x(x)
 
     def project(self, x):
@@ -109,7 +105,7 @@ class BaseProblem(ABC):
 
 
 class ParametricProblemBase(ABC):
-    """Unified interface for parametric optimization problem families."""
+    """Unified interface for parametric families with contract `(input_params, y)`."""
 
     nvar: int
     n_constraints: int | None = None
@@ -118,16 +114,16 @@ class ParametricProblemBase(ABC):
     is_parametric: bool = True
 
     @abstractmethod
-    def objective_xy(self, x, y):
-        """Return objective value(s) for input parameters x and candidate decision y."""
+    def objective_xy(self, input_params, y):
+        """Return objective value(s) for instance input parameters and candidate decision y."""
 
     @abstractmethod
-    def constraint_residual_xy(self, x, y, clip=True):
-        """Return constraint residual(s) for input parameters x and candidate decision y."""
+    def constraint_residual_xy(self, input_params, y, clip=True):
+        """Return constraint residual(s) for instance input parameters and candidate decision y."""
 
-    def project_xy(self, x, y):
+    def project_xy(self, input_params, y):
         """Optional projection/refinement hook for learning routes."""
-        del x
+        del input_params
         return y
 
     def sample_instances(self, n_samples, seed=2025, **kwargs):
@@ -149,8 +145,8 @@ class ParametricProblemBase(ABC):
         _set_problem_runtime(self, device=device, dtype=dtype)
         return self
 
-    def is_feasible_xy(self, x, y, tol=1e-6):
-        cons = normalize_constraint_violation(self.constraint_residual_xy(x, y, clip=False))
+    def is_feasible_xy(self, input_params, y, tol=1e-6):
+        cons = normalize_constraint_violation(self.constraint_residual_xy(input_params, y, clip=False))
         if not isinstance(cons, torch.Tensor):
             cons = torch.as_tensor(cons)
         return cons.max() <= tol
@@ -161,21 +157,21 @@ class StateBackedParametricProblemBase(ParametricProblemBase):
 
     This is useful for stateful families that already expose a deterministic
     `objective_x/constraint_x` view over the current internal instance data, but
-    need to participate in the shared `(input, decision)` learning-route
+    need to participate in the shared `(input_params, y)` learning-route
     contract without re-implementing the same pass-through methods in each
     subclass.
     """
 
-    def objective_xy(self, x, y):
-        del x
+    def objective_xy(self, input_params, y):
+        del input_params
         return self.objective_x(y)
 
-    def constraint_residual_xy(self, x, y, clip=True):
-        del x
+    def constraint_residual_xy(self, input_params, y, clip=True):
+        del input_params
         return _call_with_optional_clip(self.constraint_x, y, clip=clip)
 
-    def project_xy(self, x, y):
-        del x
+    def project_xy(self, input_params, y):
+        del input_params
         if hasattr(self, "project"):
             return self.project(y)
         return y
@@ -325,42 +321,10 @@ def _accepts_keyword(fn, name):
     )
 
 
-def _accepts_n_positional_args(fn, n_args):
-    signature = _signature_or_none(fn)
-    if signature is None:
-        return False
-    positional = 0
-    for param in signature.parameters.values():
-        if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            return True
-        if param.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            positional += 1
-    return positional >= n_args
-
-
 def _call_with_optional_clip(fn, *args, clip=True):
     if _accepts_keyword(fn, "clip"):
         return fn(*args, clip=clip)
     return fn(*args)
-
-
-def _call_xy_or_y(fn, x, y):
-    if _accepts_n_positional_args(fn, 2):
-        return fn(x, y)
-    if _accepts_n_positional_args(fn, 1):
-        return fn(y)
-    raise TypeError(f"{fn!r} does not accept either (x, y) or (y).")
-
-
-def _call_xy_or_y_with_optional_clip(fn, x, y, *, clip=True):
-    if _accepts_n_positional_args(fn, 2):
-        return _call_with_optional_clip(fn, x, y, clip=clip)
-    if _accepts_n_positional_args(fn, 1):
-        return _call_with_optional_clip(fn, y, clip=clip)
-    raise TypeError(f"{fn!r} does not accept either (x, y) or (y).")
 
 
 class TensorRuntimeMixin:
@@ -417,60 +381,30 @@ class _DelegatingProblemAdapterBase:
         return getattr(self.problem, name)
 
 
-class ProblemAdapter(_DelegatingProblemAdapterBase, BaseProblem):
-    """Wrap a legacy problem-like object with the unified BaseProblem contract."""
-
-    def __init__(self, problem, name=None):
-        super().__init__(problem, name=name, default_parametric=False)
-
-    def objective_x(self, x):
-        if hasattr(self.problem, "objective_x"):
-            return self.problem.objective_x(x)
-        if hasattr(self.problem, "objective"):
-            return self.problem.objective(x)
-        raise AttributeError(f"{type(self.problem).__name__} has neither objective_x nor objective.")
-
-    def constraint_x(self, x, clip=True):
-        if not hasattr(self.problem, "constraint_x"):
-            raise AttributeError(f"{type(self.problem).__name__} is missing constraint_x.")
-        return _call_with_optional_clip(self.problem.constraint_x, x, clip=clip)
-
-    def objective(self, x):
-        return self.objective_x(x)
-
-    def project(self, x):
-        if hasattr(self.problem, "project"):
-            return self.problem.project(x)
-        return x
-
-    def sample_instances(self, n_samples, seed=2025, **kwargs):
-        return super().sample_instances(n_samples, seed=seed, **kwargs)
-
-
 class FixedProblemParametricAdapter(_DelegatingProblemAdapterBase, ParametricProblemBase):
     """Adapt a fixed deterministic problem into a degenerate parametric family."""
 
     def __init__(self, problem, name=None):
         super().__init__(problem, name=name, default_parametric=True)
 
-    def objective_xy(self, x, y):
-        del x
+    def objective_xy(self, input_params, y):
+        del input_params
         if hasattr(self.problem, "objective_x"):
             return self.problem.objective_x(y)
         if hasattr(self.problem, "objective"):
             return self.problem.objective(y)
         raise AttributeError(f"{type(self.problem).__name__} is missing objective_x/objective.")
 
-    def constraint_residual_xy(self, x, y, clip=True):
-        del x
+    def constraint_residual_xy(self, input_params, y, clip=True):
+        del input_params
         if hasattr(self.problem, "constraint_x"):
             return _call_with_optional_clip(self.problem.constraint_x, y, clip=clip)
         if hasattr(self.problem, "constraint_residual"):
             return _call_with_optional_clip(self.problem.constraint_residual, y, clip=clip)
         raise AttributeError(f"{type(self.problem).__name__} is missing a constraint interface.")
 
-    def project_xy(self, x, y):
-        del x
+    def project_xy(self, input_params, y):
+        del input_params
         if hasattr(self.problem, "project"):
             return self.problem.project(y)
         return y
@@ -482,62 +416,6 @@ class FixedProblemParametricAdapter(_DelegatingProblemAdapterBase, ParametricPro
     def bind_instance(self, instance):
         del instance
         return self.problem
-
-
-class LearningProblemAdapter(_DelegatingProblemAdapterBase, ParametricProblemBase):
-    """Adapter for learning-based prediction/refinement routes.
-
-    This wrapper standardizes a parametric problem interface where:
-
-    - `x` denotes the problem input / instance parameters
-    - `y` denotes a candidate decision / prediction
-
-    It intentionally does not define a second base class hierarchy. Instead, it
-    adapts legacy or future problem objects to a shared interface that can be
-    reused by prediction-only, projection-refinement, and interior-point
-    learning workflows.
-    """
-
-    def __init__(self, problem, name=None):
-        super().__init__(problem, name=name, default_parametric=True)
-
-    def objective_xy(self, x, y):
-        if hasattr(self.problem, "objective_xy"):
-            return self.problem.objective_xy(x, y)
-        if hasattr(self.problem, "objective"):
-            return _call_xy_or_y(self.problem.objective, x, y)
-        if hasattr(self.problem, "objective_y"):
-            return self.problem.objective_y(x, y)
-        raise AttributeError(f"{type(self.problem).__name__} is missing an objective(x, y) interface.")
-
-    def constraint_residual_xy(self, x, y, clip=True):
-        for attr_name in ("constraint_residual_xy", "constraint_xy", "constraint_residual"):
-            if hasattr(self.problem, attr_name):
-                return _call_xy_or_y_with_optional_clip(getattr(self.problem, attr_name), x, y, clip=clip)
-        raise AttributeError(f"{type(self.problem).__name__} is missing a constraint residual interface.")
-
-    def project_xy(self, x, y):
-        for attr_name in ("project_xy", "project", "refine_xy"):
-            if hasattr(self.problem, attr_name):
-                return _call_xy_or_y(getattr(self.problem, attr_name), x, y)
-        return y
-
-    def sample_instances(self, n_samples, seed=2025, **kwargs):
-        return super().sample_instances(n_samples, seed=seed, **kwargs)
-
-
-def as_problem(problem):
-    """Return `problem` as a BaseProblem instance without breaking legacy classes."""
-    if isinstance(problem, BaseProblem):
-        return problem
-    return ProblemAdapter(problem)
-
-
-def as_learning_problem(problem):
-    """Return `problem` as a learning-route adapter instance."""
-    if isinstance(problem, ParametricProblemBase):
-        return problem
-    return LearningProblemAdapter(problem)
 
 
 def normalize_constraint_violation(cons):

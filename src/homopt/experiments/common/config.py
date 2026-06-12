@@ -1,0 +1,432 @@
+"""Shared experiment configuration normalization helpers."""
+
+from __future__ import annotations
+
+import copy
+
+
+def merged(base, overrides=None):
+    if base is None:
+        payload = {}
+    elif isinstance(base, dict):
+        payload = copy.deepcopy(base)
+    else:
+        payload = dict(base)
+    if overrides:
+        payload.update(copy.deepcopy(dict(overrides)))
+    return payload
+
+
+def deep_merged(base, overrides=None):
+    payload = copy.deepcopy(base) if isinstance(base, dict) else ({} if base is None else dict(base))
+    for key, value in dict(overrides or {}).items():
+        if isinstance(value, dict) and isinstance(payload.get(key), dict):
+            payload[key] = deep_merged(payload[key], value)
+        else:
+            payload[key] = copy.deepcopy(value)
+    return payload
+
+
+def _reject_config_keys(config, *, keys, context, message):
+    invalid = sorted(set(keys).intersection(config))
+    if not invalid:
+        return
+    raise ValueError(f"Unsupported {context} keys: {invalid}. {message}")
+
+
+def normalize_inner_solver_common_config(inner_solver_common):
+    """Keep inner-solver controls from overwriting outer ALM controls."""
+
+    if not inner_solver_common:
+        return inner_solver_common
+    config = copy.deepcopy(inner_solver_common)
+    _reject_config_keys(
+        config,
+        keys=("learning_rate", "lr_decay", "stepsize_rule"),
+        context="inner_solver_common",
+        message="Use inner_learning_rate, inner_lr_decay, and inner_stepsize_rule.",
+    )
+    return config
+
+
+def normalize_outer_common_config(outer_common, *, context="outer_common"):
+    """Normalize shared ALM outer-loop controls before algorithm-level merges."""
+
+    if not outer_common:
+        return outer_common
+    config = copy.deepcopy(outer_common)
+    _reject_config_keys(
+        config,
+        keys=(
+            "learning_rate",
+            "lr_decay",
+            "stepsize_rule",
+            "outer_learning_rate",
+            "outer_lr_decay",
+            "outer_stepsize_rule",
+        ),
+        context=context,
+        message=(
+            "Set shared primal step controls in common_config. "
+            "Use algorithm_config with learning_rate, lr_decay, or stepsize_rule for per-algorithm overrides."
+        ),
+    )
+    return config
+
+
+ALM_ITERATIVE_ALGORITHMS = ("Penalty", "Prox-Penalty", "ALM", "Prox-ALM", "Hom-ALM", "Prox-Hom-ALM")
+ALM_CVXPY_ALGORITHMS = ("Penalty-EQ", "Prox-Penalty-EQ", "ALM-EQ", "Prox-ALM-EQ")
+ALM_FAMILY_ALGORITHMS = (*ALM_ITERATIVE_ALGORITHMS, *ALM_CVXPY_ALGORITHMS)
+ALM_CVXPY_CONFIG_KEYS = {
+    "max_running_time",
+    "outer_iterations",
+    "convergence_threshold",
+    "dual_learning_rate",
+    "penalty_coef",
+    "penalty_growth",
+    "proximal_coef",
+    "max_penalty",
+    "max_dual",
+    "use_lagrangian",
+    "use_penalty",
+    "use_proximal",
+    "return_best_violation",
+    "check_outer_objective_change",
+    "outer_objective_change_threshold",
+    "min_outer_iterations",
+    "solver_options",
+    "subproblem_time_limit_sec",
+    "solver_verbose",
+}
+ALM_CVXPY_IGNORED_CONFIG_KEYS = {
+    "learning_rate",
+    "outer_lr_decay",
+    "min_lr",
+    "inner_min_lr",
+    "outer_stepsize_rule",
+    "check_first_order_lagrangian_gap",
+    "first_order_lagrangian_gap_threshold",
+    "outer_first_order_gap_threshold",
+}
+
+
+def _normalize_alm_public_algorithm_config(config, *, context):
+    normalized = copy.deepcopy(config)
+    _reject_config_keys(
+        normalized,
+        keys=("outer_learning_rate", "outer_lr_decay", "outer_stepsize_rule"),
+        context=context,
+        message="Use learning_rate, lr_decay, and stepsize_rule; ALM builders map them to outer-loop fields.",
+    )
+    if "lr_decay" in normalized:
+        normalized["outer_lr_decay"] = normalized.pop("lr_decay")
+    if "stepsize_rule" in normalized:
+        normalized["outer_stepsize_rule"] = normalized.pop("stepsize_rule")
+    return normalized
+
+
+def normalize_alm_algorithm_config(algorithm_name, config, *, outer_config_normalized=False):
+    """Normalize ALM-family per-algorithm config before merging."""
+
+    if not config:
+        return config
+    normalized_outer = copy.deepcopy(config) if outer_config_normalized else None
+    if algorithm_name in ALM_ITERATIVE_ALGORITHMS:
+        return normalized_outer or _normalize_alm_public_algorithm_config(
+            config,
+            context=f"{algorithm_name} config",
+        )
+    if algorithm_name in ALM_CVXPY_ALGORITHMS:
+        normalized = normalized_outer or _normalize_alm_public_algorithm_config(
+            config,
+            context=f"{algorithm_name} config",
+        )
+        unknown_keys = sorted(set(normalized) - ALM_CVXPY_CONFIG_KEYS - ALM_CVXPY_IGNORED_CONFIG_KEYS)
+        if unknown_keys:
+            raise ValueError(f"Unsupported {algorithm_name} config keys: {unknown_keys}")
+        return {key: value for key, value in normalized.items() if key in ALM_CVXPY_CONFIG_KEYS}
+    return config
+
+
+def merge_alm_outer_common(params, outer_common):
+    """Apply shared outer-loop controls to every active ALM-family config."""
+
+    if not outer_common:
+        return params
+    normalized_outer = normalize_outer_common_config(outer_common)
+    for name in ALM_FAMILY_ALGORITHMS:
+        if name in params and isinstance(params[name], dict):
+            params[name] = merged(
+                params[name],
+                normalize_alm_algorithm_config(name, normalized_outer, outer_config_normalized=True),
+            )
+    return params
+
+
+def merge_alm_inner_solver_common(params, inner_solver_common):
+    """Apply gradient-inner-loop controls only to iterative ALM variants."""
+
+    if not inner_solver_common:
+        return params
+    normalized_inner = normalize_inner_solver_common_config(inner_solver_common)
+    for name in ALM_ITERATIVE_ALGORITHMS:
+        if name in params and isinstance(params[name], dict):
+            params[name] = merged(params[name], normalized_inner)
+    return params
+
+
+def apply_alm_common_configs(params, *, outer_common=None, inner_solver_common=None):
+    """Apply shared ALM outer and inner config in the canonical order."""
+
+    params = merge_alm_outer_common(params, outer_common)
+    return merge_alm_inner_solver_common(params, inner_solver_common)
+
+
+def normalize_alm_common_config_groups(*, outer_common=None, inner_solver_common=None):
+    """Normalize ALM outer/inner shared config groups at one call site."""
+
+    return (
+        normalize_outer_common_config(outer_common),
+        normalize_inner_solver_common_config(inner_solver_common),
+    )
+
+
+def reject_iteration_budget_keys(config, *, context):
+    invalid = sorted({"outer_iterations", "max_iterations"}.intersection(dict(config or {})))
+    if invalid:
+        raise ValueError(
+            f"{context} must not set {invalid}. "
+            "Use common max_iterations as the shared outer-loop budget."
+        )
+
+
+def reject_algorithm_iteration_budget_keys(config_group, *, context):
+    for name, config in dict(config_group or {}).items():
+        if name not in ALM_FAMILY_ALGORITHMS or not isinstance(config, dict):
+            continue
+        invalid = sorted({"outer_iterations", "max_iterations"}.intersection(config))
+        if invalid:
+            raise ValueError(
+                f"{context} for {name} must not set {invalid}. "
+                "Use common max_iterations as the shared outer-loop budget."
+            )
+
+
+def align_outer_iterations_with_max_iterations(
+    outer_common=None,
+    *,
+    max_iterations=None,
+    context="outer_common",
+):
+    """Use max_iterations as the canonical outer-loop budget for ALM methods."""
+
+    reject_iteration_budget_keys(outer_common, context=context)
+    config = copy.deepcopy(outer_common) if outer_common else {}
+    if max_iterations is None:
+        return config
+    max_iter = int(max_iterations)
+    config["outer_iterations"] = max_iter
+    return config
+
+
+def enforce_alm_outer_iteration_budget(params, *, max_iterations, context="algorithm_config"):
+    """Reject ALM-family configs whose outer loop budget diverges from max_iterations."""
+
+    max_iter = int(max_iterations)
+    for name in ALM_FAMILY_ALGORITHMS:
+        config = params.get(name)
+        if not isinstance(config, dict):
+            continue
+        if "max_iterations" in config:
+            raise ValueError(
+                f"{context} for {name} must not set max_iterations. "
+                "Use common max_iterations as the shared outer-loop budget."
+            )
+        if "outer_iterations" not in config:
+            continue
+        if "outer_iterations" in config and int(config["outer_iterations"]) != max_iter:
+            raise ValueError(
+                f"Conflicting {context} parameters for {name}: "
+                f"max_iterations={max_iter!r} and outer_iterations={config['outer_iterations']!r}. "
+                "Use common max_iterations as the shared outer-loop budget."
+            )
+    return params
+
+
+def apply_config_groups(
+    params,
+    common_config=None,
+    problem_config=None,
+    algorithm_config=None,
+):
+    """Apply common/problem/algorithm config groups once at the final merge boundary."""
+
+    common_config = normalize_single_common_config(
+        common_config=common_config,
+    )
+    problem_config = normalize_single_problem_config(
+        problem_config=problem_config,
+    )
+    algorithm_config = normalize_algorithm_config_group(
+        algorithm_config=algorithm_config,
+    )
+    if "common" in params:
+        params["common"] = merged(params["common"], common_config)
+    if common_config:
+        for key, value in list(params.items()):
+            if isinstance(value, dict) and "opt_type" in value:
+                params[key] = merged(value, normalize_alm_algorithm_config(key, common_config))
+    if "prob" in params:
+        params["prob"] = merged(params["prob"], problem_config)
+    if algorithm_config:
+        unknown_algorithms = sorted(name for name in algorithm_config if name not in params)
+        if unknown_algorithms:
+            raise ValueError(f"Unknown algorithm_config entries: {unknown_algorithms}")
+        for name, config in algorithm_config.items():
+            if name in params and isinstance(params[name], dict):
+                params[name] = merged(params[name], normalize_alm_algorithm_config(name, config))
+    return params
+
+
+def normalize_single_common_config(
+    *,
+    common=None,
+    common_config=None,
+):
+    payload = merged(common, common_config)
+    _reject_config_keys(
+        payload,
+        keys=("outer_learning_rate", "outer_lr_decay", "outer_stepsize_rule"),
+        context="common_config",
+        message="Use learning_rate, lr_decay, and stepsize_rule; ALM builders map them to outer-loop fields.",
+    )
+    return payload
+
+
+def normalize_single_problem_config(
+    *,
+    problem_config=None,
+):
+    return merged(None, problem_config)
+
+
+def normalize_single_algorithm_config(
+    *,
+    algorithm_config=None,
+):
+    return deep_merged(None, algorithm_config)
+
+
+def normalize_algorithm_config_group(
+    *,
+    algorithm_config=None,
+):
+    """Merge per-algorithm config groups."""
+
+    return normalize_single_algorithm_config(
+        algorithm_config=algorithm_config,
+    )
+
+
+def normalize_solver_run_config(
+    *,
+    solver_name="ipopt",
+    solver_options=None,
+    solver_config=None,
+):
+    normalized = {
+        "solver_name": solver_name,
+        "solver_options": dict(solver_options or {}),
+    }
+    if solver_config:
+        translated = dict(solver_config)
+        _reject_config_keys(
+            translated,
+            keys=("name", "options"),
+            context="solver_config",
+            message="Use solver_name and solver_options.",
+        )
+        normalized = merged(normalized, translated)
+    normalized["solver_name"] = str(normalized.get("solver_name", solver_name))
+    normalized["solver_options"] = dict(normalized.get("solver_options") or {})
+    return normalized
+
+
+def normalize_jcc_problem_config(
+    *,
+    n_scenarios,
+    epsilon,
+    demand_std,
+    seed,
+    problem_config=None,
+):
+    supported_keys = {"n_scenarios", "epsilon", "demand_std", "seed"}
+    problem_cfg = {
+        "n_scenarios": int(n_scenarios),
+        "epsilon": float(epsilon),
+        "demand_std": float(demand_std),
+        "seed": int(seed),
+    }
+    if problem_config:
+        overrides = dict(problem_config)
+        unknown = sorted(set(overrides) - supported_keys)
+        if unknown:
+            raise ValueError(f"Unsupported JCC problem_config keys: {unknown}")
+        problem_cfg.update(overrides)
+    problem_cfg["n_scenarios"] = int(problem_cfg["n_scenarios"])
+    problem_cfg["seed"] = int(problem_cfg["seed"])
+    problem_cfg["epsilon"] = float(problem_cfg["epsilon"])
+    problem_cfg["demand_std"] = float(problem_cfg["demand_std"])
+    return problem_cfg
+
+
+def normalize_jcc_solver_configs(
+    *,
+    solver_configs=None,
+):
+    canonical = {
+        "mixed_integer": {"solver": "GUROBI", "M": 1000.0, "verbose": False},
+        "cvar": {"solver": "MOSEK", "verbose": False},
+        "scenario": {"solver": "MOSEK", "verbose": False},
+    }
+    if solver_configs:
+        for name, cfg in dict(solver_configs).items():
+            if name not in canonical:
+                raise ValueError(f"Unsupported JCC solver config group: {name}")
+            canonical[name] = merged(canonical[name], cfg)
+    return canonical
+
+
+def require_explicit_config(config, name):
+    if config is None:
+        raise ValueError(f"{name} must be provided explicitly by the experiment script.")
+    return config
+
+
+__all__ = [
+    "ALM_CVXPY_ALGORITHMS",
+    "ALM_FAMILY_ALGORITHMS",
+    "ALM_ITERATIVE_ALGORITHMS",
+    "align_outer_iterations_with_max_iterations",
+    "apply_alm_common_configs",
+    "apply_config_groups",
+    "deep_merged",
+    "enforce_alm_outer_iteration_budget",
+    "merge_alm_inner_solver_common",
+    "merge_alm_outer_common",
+    "merged",
+    "normalize_algorithm_config_group",
+    "normalize_alm_algorithm_config",
+    "normalize_alm_common_config_groups",
+    "normalize_inner_solver_common_config",
+    "normalize_jcc_problem_config",
+    "normalize_jcc_solver_configs",
+    "normalize_outer_common_config",
+    "normalize_single_algorithm_config",
+    "normalize_single_common_config",
+    "normalize_single_problem_config",
+    "normalize_solver_run_config",
+    "require_explicit_config",
+    "reject_algorithm_iteration_budget_keys",
+    "reject_iteration_budget_keys",
+]

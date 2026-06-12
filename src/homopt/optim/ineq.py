@@ -1,6 +1,6 @@
 """Inequality-focused optimizer layer."""
 
-from ._core_impl import FrankWolfeOptimizer, HomPGDOptimizer, PGDOptimizer, RadialDualOptimizer
+from .registry import FrankWolfeOptimizer, HomPGDOptimizer, PGDOptimizer, RadialDualOptimizer
 from .dispatch import run_algorithm as _run_algorithm
 from .shared import AdamOptimizer, GDOptimizer, NormalizedGDOptimizer
 

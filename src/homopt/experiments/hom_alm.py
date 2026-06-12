@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .benchmarks_single import convex_algorithm_comparison, jcc_algorithm_comparison, jcc_baseline_solver_sweep
+from .benchmarks.convex import convex_algorithm_comparison
+from .benchmarks.jcc import jcc_algorithm_comparison, jcc_baseline_solver_sweep
 
 __all__ = [
     "convex_algorithm_comparison",

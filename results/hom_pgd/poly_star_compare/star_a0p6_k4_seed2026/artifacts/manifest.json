@@ -1,0 +1,16 @@
+{
+  "algorithms": [
+    "Hom-PGD",
+    "PGD",
+    "ALM"
+  ],
+  "metadata": {
+    "problem_family": "toy_star"
+  },
+  "records": {
+    "ALM": "artifacts/records/ALM.npy",
+    "Hom-PGD": "artifacts/records/Hom-PGD.npy",
+    "PGD": "artifacts/records/PGD.npy"
+  },
+  "version": 1
+}

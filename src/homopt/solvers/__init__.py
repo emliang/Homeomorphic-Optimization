@@ -6,24 +6,20 @@ from importlib import import_module
 
 
 _SYMBOL_TO_TARGET = {
-    "ChanceConstraintSolver": ("homopt.solvers.core", "ChanceConstraintSolver"),
-    "ConvexSolver": ("homopt.solvers.core", "ConvexSolver"),
+    "ChanceConstraintSolver": ("homopt.solvers.chance", "ChanceConstraintSolver"),
+    "ConvexSolver": ("homopt.solvers.convex", "ConvexSolver"),
     "JCCDCOPFCVaRSolver": ("homopt.solvers.jcc", "JCCDCOPFCVaRSolver"),
     "JCCDCOPFRobustScenarioSolver": ("homopt.solvers.jcc", "JCCDCOPFRobustScenarioSolver"),
     "JCCDCOPFSolver": ("homopt.solvers.jcc", "JCCDCOPFSolver"),
     "JCCLinearCVaRSolver": ("homopt.solvers.jcc_linear", "JCCLinearCVaRSolver"),
     "JCCLinearRobustScenarioSolver": ("homopt.solvers.jcc_linear", "JCCLinearRobustScenarioSolver"),
     "JCCLinearSolver": ("homopt.solvers.jcc_linear", "JCCLinearSolver"),
-    "MaxCutSolver": ("homopt.solvers.core", "MaxCutSolver"),
-    "PYOMO_AVAILABLE": ("homopt.solvers.core", "PYOMO_AVAILABLE"),
-    "QCQPSolver": ("homopt.solvers.core", "QCQPSolver"),
-    "StiefelALMEQPGDSolver": ("homopt.solvers.stiefel", "StiefelALMEQPGDSolver"),
+    "MaxCutSolver": ("homopt.solvers.maxcut", "MaxCutSolver"),
+    "PYOMO_AVAILABLE": ("homopt.solvers.pyomo", "PYOMO_AVAILABLE"),
+    "QCQPSolver": ("homopt.solvers.qcqp", "QCQPSolver"),
     "StiefelPyomoIPOPTSolver": ("homopt.solvers.stiefel", "StiefelPyomoIPOPTSolver"),
-    "StiefelRetractionALMSolver": ("homopt.solvers.stiefel", "StiefelRetractionALMSolver"),
-    "StiefelRetractionPenaltySolver": ("homopt.solvers.stiefel", "StiefelRetractionPenaltySolver"),
-    "StiefelRetractionSolver": ("homopt.solvers.stiefel", "StiefelRetractionSolver"),
-    "normalize_exact_solver_call_kwargs": ("homopt.solvers.core", "normalize_exact_solver_call_kwargs"),
-    "solve_exact_result": ("homopt.solvers.core", "solve_exact_result"),
+    "normalize_exact_solver_call_kwargs": ("homopt.solvers.common", "normalize_exact_solver_call_kwargs"),
+    "solve_exact_result": ("homopt.solvers.common", "solve_exact_result"),
 }
 
 
@@ -49,11 +45,7 @@ __all__ = [
     "MaxCutSolver",
     "PYOMO_AVAILABLE",
     "QCQPSolver",
-    "StiefelALMEQPGDSolver",
     "StiefelPyomoIPOPTSolver",
-    "StiefelRetractionALMSolver",
-    "StiefelRetractionPenaltySolver",
-    "StiefelRetractionSolver",
     "normalize_exact_solver_call_kwargs",
     "solve_exact_result",
 ]

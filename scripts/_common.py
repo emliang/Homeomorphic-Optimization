@@ -28,7 +28,7 @@ from homopt.experiments import (  # noqa: E402
     default_script_output_dir,
     record_script_run,
 )
-from homopt.experiments._naming import (  # noqa: E402
+from homopt.experiments.common.naming import (  # noqa: E402
     labeled_run_name,
     sanitize_label,
     scale_label,
@@ -194,6 +194,12 @@ def script_run_output_dir(name, params=None, output_root=None, family=None):
     return output_dir / label if label else output_dir
 
 
+def labeled_child_output_dir(parent_output_dir, params=None):
+    label = result_subfolder_label(params)
+    parent = Path(parent_output_dir)
+    return parent / label if label else parent
+
+
 def run_script_experiment(name, params, run_fn, output_dir=None, family=None):
     return record_script_run(
         name=name,
@@ -221,7 +227,7 @@ def make_benchmark_entrypoint(
     family=None,
     instances=None,
     label_builder=None,
-    default_params=None,
+    fallback_params=None,
 ):
     if instances is None:
         target_output_dir = output_dir or script_run_output_dir(name, params=params, family=family)
@@ -252,6 +258,7 @@ def make_benchmark_entrypoint(
             overrides,
             label_builder=label_builder,
             family=family,
+            parent_output_dir=target_output_dir,
         )
 
     def main(selected_instances=None):
@@ -261,8 +268,9 @@ def make_benchmark_entrypoint(
             base_params,
             instances if selected_instances is None else selected_instances,
             label_builder=label_builder,
-            default_params=default_params or base_params,
+            fallback_params=fallback_params or base_params,
             family=family,
+            parent_output_dir=target_output_dir,
         )
 
     return run, main, target_output_dir
@@ -277,10 +285,15 @@ def run_labeled_benchmark_instance(
     *,
     label_builder=None,
     family=None,
+    parent_output_dir=None,
 ):
     params = _labeled_params(base_params, label, overrides, label_builder=label_builder)
     run_name = labeled_run_name(name, params)
-    output_dir = script_run_output_dir(name, params=params, family=family)
+    output_dir = (
+        labeled_child_output_dir(parent_output_dir, params=params)
+        if parent_output_dir is not None
+        else script_run_output_dir(name, params=params, family=family)
+    )
 
     def _run():
         return benchmark(output_dir=output_dir, **benchmark_params(params))
@@ -301,19 +314,21 @@ def run_labeled_benchmark_instances(
     instances,
     *,
     label_builder=None,
-    default_params=None,
+    fallback_params=None,
     family=None,
+    parent_output_dir=None,
 ):
     if not instances:
         return [
             run_labeled_benchmark_instance(
                 name,
                 benchmark,
-                default_params or base_params,
+                fallback_params or base_params,
                 None,
                 None,
                 label_builder=label_builder,
                 family=family,
+                parent_output_dir=parent_output_dir,
             )
         ]
     results = []
@@ -336,6 +351,7 @@ def run_labeled_benchmark_instances(
                 overrides,
                 label_builder=label_builder,
                 family=family,
+                parent_output_dir=parent_output_dir,
             )
         )
     return results

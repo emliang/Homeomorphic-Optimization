@@ -14,7 +14,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from _common import make_benchmark_entrypoint, merge_params, script_family
-from hom_pgd._presets import adversarial_result_label
+from hom_pgd._configs import adversarial_result_label
 from homopt.experiments.hom_pgd import adversarial_attack_experiment
 
 
@@ -26,6 +26,7 @@ BENCHMARK = adversarial_attack_experiment
 # ---- Base config ----
 RUNTIME = {
     "device": "auto",  # "cuda:0" | "cpu" | "auto"
+    "dtype": None,
     "seed": 42,
     "download": True,
 }
@@ -35,6 +36,7 @@ WORKFLOW = {
     "train": False,
     "attack": True,
     "visualize": True,
+    "run_all": False,
     "train_if_missing": True,
 }
 
@@ -53,7 +55,10 @@ TRAINING = {
 
 EVAL = {
     "attack_selection_size": 500,
+    "attack_eval_indices": None,
     "visualize_examples": 2,
+    "visualize_eval_indices": None,
+    "single_case_subdir_by_norm": True,
 }
 
 # Weighted-norm geometry config (clear and centrally editable).

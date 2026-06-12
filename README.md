@@ -308,6 +308,14 @@ This is a research package. The Hom-PGD workflow is organized around editable
 experiment scripts and shared package modules, but the public API should still
 be treated as evolving.
 
+## Implementation Note
+
+The original paper implementation uses automatic differentiation for gradient
+calculation. This repository implements explicit gradients for all included
+methods where supported. As a result, per-iteration cost comparisons from this
+codebase may not exactly match the per-iteration cost comparisons reported in
+the paper.
+
 ## Citation
 
 If this repository supports your research, please cite:

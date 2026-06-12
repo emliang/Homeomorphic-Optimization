@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Mapping, Union
 
@@ -15,9 +16,12 @@ def _fmt_summary_scalar(value, *, digits=4, default="-"):
     if value is None:
         return default
     try:
-        return f"{float(value):.{digits}g}"
+        scalar = float(value)
     except (TypeError, ValueError):
         return str(value)
+    if not math.isfinite(scalar):
+        return default
+    return f"{scalar:.{digits}g}"
 
 
 def _comparison_summary_rows(result):
@@ -84,7 +88,10 @@ def _print_comparison_summary(result):
         label = f"{method} [{route}]" if route else str(method)
         objective = _comparison_row_value(row, "objective_mean", "objective")
         eq_violation = _comparison_row_value(row, "equality_violation_mean", "equality_violation")
-        ineq_violation = _comparison_row_value(row, "inequality_violation_mean", "inequality_violation")
+        ineq_violation = _first_present(
+            _comparison_row_value(row, "inequality_violation_mean", "inequality_violation"),
+            _comparison_row_value(row, "violation_mean", "violation"),
+        )
         lagrangian_gap = _comparison_row_value(row, "first_order_lagrangian_gap_mean", "first_order_lagrangian_gap")
         avg_outer_iter_time = _comparison_row_value(row, "avg_outer_iter_time_mean", "avg_outer_iter_time")
         avg_inner_iter_time = _first_present(

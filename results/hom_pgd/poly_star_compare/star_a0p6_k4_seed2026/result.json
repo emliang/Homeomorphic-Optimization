@@ -1,0 +1,83 @@
+{
+  "artifacts": {
+    "full_violation_convergence_iteration": "artifacts/toy_star_full_violation_convergence_by_iter.pdf",
+    "full_violation_convergence_iteration_logx": "artifacts/toy_star_full_violation_convergence_by_iter_logx.pdf",
+    "full_violation_convergence_time": "artifacts/toy_star_full_violation_convergence_by_time.pdf",
+    "full_violation_convergence_time_logx": "artifacts/toy_star_full_violation_convergence_by_time_logx.pdf",
+    "inequality_violation_convergence_iteration": "artifacts/toy_star_inequality_violation_convergence_by_iter.pdf",
+    "inequality_violation_convergence_iteration_logx": "artifacts/toy_star_inequality_violation_convergence_by_iter_logx.pdf",
+    "inequality_violation_convergence_time": "artifacts/toy_star_inequality_violation_convergence_by_time.pdf",
+    "inequality_violation_convergence_time_logx": "artifacts/toy_star_inequality_violation_convergence_by_time_logx.pdf",
+    "manifest": "artifacts/manifest.json",
+    "metric_traces": "artifacts/toy_star_metric_traces.json",
+    "objective_convergence_iteration": "artifacts/toy_star_objective_convergence_by_iter.pdf",
+    "objective_convergence_iteration_logx": "artifacts/toy_star_objective_convergence_by_iter_logx.pdf",
+    "objective_convergence_time": "artifacts/toy_star_objective_convergence_by_time.pdf",
+    "objective_convergence_time_logx": "artifacts/toy_star_objective_convergence_by_time_logx.pdf",
+    "records": "artifacts/records",
+    "records_dir": "artifacts/records",
+    "summary": "artifacts/summary.json",
+    "trajectory_alm": "artifacts/trajectory_ALM.pdf",
+    "trajectory_hom_pgd": "artifacts/trajectory_Hom_PGD.pdf",
+    "trajectory_legend": "artifacts/toy_star_trajectory_legend.pdf",
+    "trajectory_pgd": "artifacts/trajectory_PGD.pdf",
+    "trajectory_z_hom_pgd": "artifacts/trajectory_z_Hom_PGD.pdf"
+  },
+  "context": {
+    "device": "cpu",
+    "dtype": "float32",
+    "entrypoint": "script",
+    "name": "poly_star_compare",
+    "output_dir": "/Users/lem/Github/Homeomorphic-Optimization/results/hom_pgd/poly_star_compare/star_a0p6_k4_seed2026",
+    "seed": 2026
+  },
+  "feasible": true,
+  "metrics": {
+    "algorithms": [
+      "Hom-PGD",
+      "PGD",
+      "ALM"
+    ],
+    "benchmarks": {
+      "ALM": {
+        "final_objective": 0.28424549102783203,
+        "final_violation": 0.0,
+        "iterations": 10000,
+        "last_trans_time": 0.0,
+        "mean_inner_iter_time": 0.0005427561667051123,
+        "mean_outer_iter_time": 0.0006551216416995885,
+        "record_path": "artifacts/records/ALM.npy",
+        "total_inner_iter_time": 5.427561667051123,
+        "total_iter_time": 6.551216416995885,
+        "total_outer_iter_time": 6.551216416995885,
+        "total_wall_time": 7.355680624999877
+      },
+      "Hom-PGD": {
+        "final_objective": 0.2842825651168823,
+        "final_transform_time": 5.1875000281143e-05,
+        "final_violation": 0.0,
+        "initial_transform_time": 0.0003573750000214204,
+        "iterations": 380,
+        "last_trans_time": 5.1875000281143e-05,
+        "record_path": "artifacts/records/Hom-PGD.npy",
+        "total_iter_time": 0.059402089989816886,
+        "total_wall_time": 0.1012593340001331
+      },
+      "PGD": {
+        "final_objective": 0.28420817852020264,
+        "final_violation": 0.00017839670181274414,
+        "iterations": 10000,
+        "last_trans_time": 0.0,
+        "record_path": "artifacts/records/PGD.npy",
+        "total_iter_time": 41.04755149891753,
+        "total_wall_time": 41.628204958000424
+      }
+    },
+    "elapsed_sec": 51.99381750000066,
+    "nvar": 2,
+    "problem": "toy_star",
+    "seed": 2026
+  },
+  "name": "poly_star_compare",
+  "objective": 0.2842825651168823
+}

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from homopt.problems._jcc_linear_impl import (
+from homopt.problems.jcc.linear import (
     JCCLinearCVaRSolver as _ProblemJCCLinearCVaRSolver,
     JCCLinearRobustScenarioSolver as _ProblemJCCLinearRobustScenarioSolver,
     JCCLinearSolver as _ProblemJCCLinearSolver,
 )
-from homopt.solvers.core import _normalized_exact_solver_result
+from homopt.solvers.common import _normalized_exact_solver_result
 
 
 class _BaseJCCLinearSolverMixin:

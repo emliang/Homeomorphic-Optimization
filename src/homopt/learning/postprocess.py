@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import torch
 
-from homopt.models import homeo_bisection, ip_bisection
 from homopt.problems import bind_problem_instance, normalize_constraint_violation
 from homopt.solvers import QCQPSolver, solve_exact_result
 
 from .base import BaseRefiner
+from .bisection_adapters import homeomorphic_bisection, interior_point_bisection
 
 
-def _max_violation(problem, x, y):
-    residual = normalize_constraint_violation(problem.constraint_residual_xy(x, y, clip=False))
+def _max_violation(problem, input_params, y):
+    residual = normalize_constraint_violation(problem.constraint_residual_xy(input_params, y, clip=False))
     return residual.max(dim=1, keepdim=True)[0]
 
 
-def _infeasible_mask(problem, x, y, tol):
-    return (_max_violation(problem, x, y) > float(tol)).view(-1)
+def _infeasible_mask(problem, input_params, y, tol):
+    return (_max_violation(problem, input_params, y) > float(tol)).view(-1)
 
 
 def _inverse_scale_fixed_box(problem_family, y):
@@ -38,32 +38,32 @@ class ExactSolverProjectionRefiner(BaseRefiner):
         self.solve_config = dict(solve_config or {})
         self.tol = float(tol)
 
-    def refine(self, problem, x, y, **kwargs):
+    def refine(self, problem, input_params, y_pred, **kwargs):
         del kwargs
-        out = y.detach().clone()
-        infeasible = _infeasible_mask(problem, x, y, self.tol)
+        out = y_pred.detach().clone()
+        infeasible = _infeasible_mask(problem, input_params, y_pred, self.tol)
         if not bool(torch.any(infeasible)):
             return out
         for idx in torch.nonzero(infeasible, as_tuple=False).view(-1).tolist():
-            bound_problem = bind_problem_instance(self.problem_family, x[idx])
+            bound_problem = bind_problem_instance(self.problem_family, input_params[idx])
             solver = self.solver_factory(bound_problem.prob_para)
             result = self.solve_exact(
                 solver,
                 solve_config={
                     "solve_type": self.solve_type,
-                    "x_init": y[idx].detach().cpu().numpy(),
+                    "x_init": y_pred[idx].detach().cpu().numpy(),
                     **self.solve_config,
                 },
             )
             solution = result.get("solution")
             if solution is not None:
-                out[idx] = torch.as_tensor(solution, dtype=y.dtype, device=y.device)
+                out[idx] = torch.as_tensor(solution, dtype=y_pred.dtype, device=y_pred.device)
         return out
 
 
-class WarmStartSolverRefiner(ExactSolverProjectionRefiner):
-    name = "warm_start_solver"
-    solve_type = "warm_start"
+class InitializedOptSolverRefiner(ExactSolverProjectionRefiner):
+    name = "initialized_opt_solver"
+    solve_type = "initialized_opt"
 
 
 class DiffProjectionRefiner(BaseRefiner):
@@ -75,18 +75,18 @@ class DiffProjectionRefiner(BaseRefiner):
         self.momentum = float(momentum)
         self.tol = float(tol)
 
-    def refine(self, problem, x, y, **kwargs):
+    def refine(self, problem, input_params, y_pred, **kwargs):
         del kwargs
-        out = y.detach().clone()
-        infeasible = _infeasible_mask(problem, x, y, self.tol)
+        out = y_pred.detach().clone()
+        infeasible = _infeasible_mask(problem, input_params, y_pred, self.tol)
         if not bool(torch.any(infeasible)):
             return out
-        x_sub = x[infeasible]
+        input_sub = input_params[infeasible]
         y_sub = out[infeasible]
         velocity = torch.zeros_like(y_sub)
         for _ in range(self.steps):
             y_var = y_sub.detach().requires_grad_(True)
-            residual = normalize_constraint_violation(problem.constraint_residual_xy(x_sub, y_var, clip=False))
+            residual = normalize_constraint_violation(problem.constraint_residual_xy(input_sub, y_var, clip=False))
             if bool(torch.all(residual.max(dim=1)[0] <= self.tol)):
                 y_sub = y_var.detach()
                 break
@@ -107,28 +107,28 @@ class HomeomorphicProjectionRefiner(BaseRefiner):
         self.projection_config = dict(projection_config or {})
         self.tol = float(tol)
 
-    def refine(self, problem, x, y, **kwargs):
+    def refine(self, problem, input_params, y_pred, **kwargs):
         del kwargs
-        out = y.detach().clone()
-        infeasible = _infeasible_mask(problem, x, y, self.tol)
+        out = y_pred.detach().clone()
+        infeasible = _infeasible_mask(problem, input_params, y_pred, self.tol)
         if not bool(torch.any(infeasible)):
             return out
-        x_sub = x[infeasible]
+        input_sub = input_params[infeasible]
         y_sub = out[infeasible]
         z_infeasible = _inverse_scale_fixed_box(self.problem_family, y_sub)
-        z_feasible, _ = homeo_bisection(
+        z_feasible, _ = homeomorphic_bisection(
             self.model,
             self.problem_family,
             z_infeasible,
-            x_sub,
+            input_sub,
             self.projection_config,
             eps_converge=self.tol,
         )
         with torch.inference_mode():
-            x_mapped, *_ = self.model(z_feasible, x_sub)
-            x_scaled = self.problem_family.scale(x_sub, x_mapped)
-            x_full = self.problem_family.complete_partial(x_sub, x_scaled)
-        out[infeasible] = x_full.to(dtype=y.dtype, device=y.device)
+            u_mapped, *_ = self.model(z_feasible, input_sub)
+            y_partial = self.problem_family.scale(input_sub, u_mapped)
+            y_full = self.problem_family.complete_partial(input_sub, y_partial)
+        out[infeasible] = y_full.to(dtype=y_pred.dtype, device=y_pred.device)
         return out
 
 
@@ -141,26 +141,26 @@ class IPNNBisectionRefiner(BaseRefiner):
         self.projection_config = dict(projection_config or {})
         self.tol = float(tol)
 
-    def refine(self, problem, x, y, **kwargs):
+    def refine(self, problem, input_params, y_pred, **kwargs):
         del kwargs
-        out = y.detach().clone()
-        infeasible = _infeasible_mask(problem, x, y, self.tol)
+        out = y_pred.detach().clone()
+        infeasible = _infeasible_mask(problem, input_params, y_pred, self.tol)
         if not bool(torch.any(infeasible)):
             return out
-        x_sub = x[infeasible]
+        input_sub = input_params[infeasible]
         y_sub = out[infeasible]
-        z_infeasible = _inverse_scale_fixed_box(self.problem_family, y_sub)
+        u_infeasible = _inverse_scale_fixed_box(self.problem_family, y_sub)
         with torch.inference_mode():
-            feasible_ip = self.model(x_sub)
-        x_proj, _, _ = ip_bisection(
-            feasible_ip,
+            feasible_u = self.model(input_sub)
+        y_proj, _, _ = interior_point_bisection(
+            feasible_u,
             self.problem_family,
-            z_infeasible,
-            x_sub,
+            u_infeasible,
+            input_sub,
             self.projection_config,
             eps_converge=self.tol,
         )
-        out[infeasible] = x_proj.to(dtype=y.dtype, device=y.device)
+        out[infeasible] = y_proj.to(dtype=y_pred.dtype, device=y_pred.device)
         return out
 
 
@@ -169,5 +169,5 @@ __all__ = [
     "ExactSolverProjectionRefiner",
     "HomeomorphicProjectionRefiner",
     "IPNNBisectionRefiner",
-    "WarmStartSolverRefiner",
+    "InitializedOptSolverRefiner",
 ]

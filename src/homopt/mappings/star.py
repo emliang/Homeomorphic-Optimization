@@ -13,7 +13,7 @@ class StarMap:
     def __init__(self, star_set, p_norm=2, x_origin=(0, 0)):
         self.alpha = star_set.alpha
         self.num_star = star_set.num_star
-        # Kept for compatibility with legacy constructor signatures.
+        # Optimizers and visualization helpers use this to define the source ball.
         self.p_norm = p_norm
         self.center = torch.tensor(x_origin, dtype=torch.float32).view(1, -1)
 

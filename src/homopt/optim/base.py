@@ -24,28 +24,3 @@ class BaseOptimizer(ABC):
         self.problem = problem
         return self
 
-
-class OptimizerAdapter(BaseOptimizer):
-    """Wrap an optimizer-like object into the BaseOptimizer contract."""
-
-    def __init__(self, optimizer, problem=None, params=None, hom_map=None):
-        super().__init__(problem=problem, params=params, hom_map=hom_map)
-        self.optimizer = optimizer
-        self.name = type(optimizer).__name__
-
-    def optimize(self, initial_point=None, verbose=False, seed=2025):
-        if hasattr(self.optimizer, "optimize"):
-            return self.optimizer.optimize(initial_point=initial_point, verbose=verbose, seed=seed)
-        if hasattr(self.optimizer, "solve"):
-            return self.optimizer.solve(initial_point=initial_point, verbose=verbose, seed=seed)
-        raise AttributeError(f"{type(self.optimizer).__name__} has neither optimize nor solve.")
-
-    def __getattr__(self, name):
-        return getattr(self.optimizer, name)
-
-
-def as_optimizer(optimizer):
-    """Return an optimizer as a BaseOptimizer without breaking legacy classes."""
-    if isinstance(optimizer, BaseOptimizer):
-        return optimizer
-    return OptimizerAdapter(optimizer)

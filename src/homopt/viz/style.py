@@ -35,7 +35,7 @@ ALGORITHM_COLORS = {
     "predict_exact_projection": "#009E73",
     "predict_homeomorphic_projection": "#D62728",
     "predict_ip_bisection": "#9467BD",
-    "predict_warm_start": "#E69F00",
+    "predict_initialized_opt": "#E69F00",
 }
 
 ALGORITHM_LINE_STYLES = {

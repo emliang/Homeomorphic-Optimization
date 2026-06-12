@@ -113,6 +113,8 @@ def trace_payload(traces):
 
 
 def reference_objective_from_payload(payload):
+    if payload.get("reference_objective") is not None:
+        return payload.get("reference_objective")
     for row in payload.get("comparison_rows", []):
         if row.get("method") == "ConvexSolver":
             return row.get("objective")

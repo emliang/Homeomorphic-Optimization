@@ -7,9 +7,9 @@ SCRIPT_EXPERIMENTS = {
     "convex_eq_2d": "scripts/hom_alm/run_convex_eq_2d.py",
     "convex_eq_compare": "scripts/hom_alm/run_convex_eq_compare.py",
     "convex_ineq_compare": "scripts/hom_pgd/run_convex_ineq_compare.py",
+    "convex_parametric_predictor_postprocess": "scripts/learning_postprocess/run_convex_parametric_predictor_postprocess.py",
     "jcc_opf_compare": "scripts/inn_pgd/run_jcc_opf_compare.py",
     "maxcut_sdp_compare": "scripts/hom_pgd/run_maxcut_sdp_compare.py",
-    "poly_star_ablation": "scripts/hom_pgd/run_poly_star_ablation.py",
     "poly_star_compare": "scripts/hom_pgd/run_poly_star_compare.py",
     "qcqp_inn_ablation": "scripts/inn_pgd/run_qcqp_inn_ablation.py",
     "qcqp_inn_compare": "scripts/inn_pgd/run_qcqp_inn_compare.py",
@@ -24,7 +24,6 @@ EXPERIMENT_FAMILIES = {
         "scripts": [
             "convex_ineq_compare",
             "poly_star_compare",
-            "poly_star_ablation",
             "maxcut_sdp_compare",
             "adversarial_attack",
         ],
@@ -49,6 +48,7 @@ EXPERIMENT_FAMILIES = {
     "learning_postprocess": {
         "description": "Neural predictor plus post-processing baselines.",
         "scripts": [
+            "convex_parametric_predictor_postprocess",
             "qcqp_predictor_postprocess",
         ],
     },

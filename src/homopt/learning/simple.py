@@ -7,6 +7,7 @@ import torch
 from homopt.problems import normalize_constraint_violation
 
 from .base import BasePredictor, BaseRefiner
+from .bisection import BisectionConfig, bisect_segment
 
 
 class ConstantPredictor(BasePredictor):
@@ -17,9 +18,9 @@ class ConstantPredictor(BasePredictor):
     def __init__(self, value=0.0):
         self.value = float(value)
 
-    def predict(self, x, **kwargs):
+    def predict(self, input_like, **kwargs):
         del kwargs
-        return torch.full_like(x, self.value)
+        return torch.full_like(input_like, self.value)
 
 
 class ConstantDecisionPredictor(BasePredictor):
@@ -31,10 +32,15 @@ class ConstantDecisionPredictor(BasePredictor):
         self.decision_dim = int(decision_dim)
         self.value = float(value)
 
-    def predict(self, x, **kwargs):
+    def predict(self, input_params, **kwargs):
         del kwargs
-        batch_size = int(x.shape[0])
-        return torch.full((batch_size, self.decision_dim), self.value, dtype=x.dtype, device=x.device)
+        batch_size = int(input_params.shape[0])
+        return torch.full(
+            (batch_size, self.decision_dim),
+            self.value,
+            dtype=input_params.dtype,
+            device=input_params.device,
+        )
 
 
 class ProjectionRefiner(BaseRefiner):
@@ -42,9 +48,9 @@ class ProjectionRefiner(BaseRefiner):
 
     name = "projection"
 
-    def refine(self, problem, x, y, **kwargs):
+    def refine(self, problem, input_params, y, **kwargs):
         del kwargs
-        return problem.project_xy(x, y)
+        return problem.project_xy(input_params, y)
 
 
 class IdentityRefiner(BaseRefiner):
@@ -52,8 +58,8 @@ class IdentityRefiner(BaseRefiner):
 
     name = "identity"
 
-    def refine(self, problem, x, y, **kwargs):
-        del problem, x, kwargs
+    def refine(self, problem, input_params, y, **kwargs):
+        del problem, input_params, kwargs
         return y
 
 
@@ -67,7 +73,8 @@ class RayBisectionRefiner(BaseRefiner):
         self.tol = float(tol)
         self.anchor = anchor
 
-    def _resolve_anchor(self, problem, x, y, anchor):
+    def _resolve_anchor(self, problem, input_params, y, anchor):
+        del input_params
         base = self.anchor if anchor is None else anchor
         if base is None:
             base = getattr(problem, "fixed_x0", None)
@@ -80,23 +87,28 @@ class RayBisectionRefiner(BaseRefiner):
             base = base.expand(y.shape[0], -1)
         return base
 
-    def refine(self, problem, x, y, **kwargs):
-        anchor = self._resolve_anchor(problem, x, y, kwargs.pop("anchor", None))
+    def refine(self, problem, input_params, y, **kwargs):
+        anchor = self._resolve_anchor(problem, input_params, y, kwargs.pop("anchor", None))
         if kwargs:
             raise TypeError(f"Unsupported RayBisectionRefiner kwargs: {sorted(kwargs)}")
 
-        raw_cons = normalize_constraint_violation(problem.constraint_residual_xy(x, y, clip=False))
-        raw_max = raw_cons.max(dim=1, keepdim=True)[0]
-        lo = torch.where(raw_max <= self.tol, torch.ones_like(raw_max), torch.zeros_like(raw_max))
-        hi = torch.ones_like(lo)
+        def _violation(candidate_y):
+            residual = normalize_constraint_violation(
+                problem.constraint_residual_xy(input_params, candidate_y, clip=False)
+            )
+            return residual.max(dim=1, keepdim=True)[0]
 
-        for _ in range(self.steps):
-            mid = 0.5 * (lo + hi)
-            cand = anchor + mid * (y - anchor)
-            cand_cons = normalize_constraint_violation(problem.constraint_residual_xy(x, cand, clip=False))
-            cand_max = cand_cons.max(dim=1, keepdim=True)[0]
-            feasible = cand_max <= self.tol
-            lo = torch.where(feasible, mid, lo)
-            hi = torch.where(feasible, hi, mid)
-
-        return anchor + lo * (y - anchor)
+        result = bisect_segment(
+            anchor=anchor,
+            target=y,
+            decode_to_y=lambda candidate_y: candidate_y,
+            violation=_violation,
+            config=BisectionConfig(
+                max_steps=self.steps,
+                feasibility_tol=self.tol,
+                convergence_tol=0.0,
+                step_fraction=0.5,
+                final_alpha="lower",
+            ),
+        )
+        return result.point

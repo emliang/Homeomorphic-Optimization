@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from homopt.problems._jcc_opf_impl import (
+from homopt.problems.jcc.opf import (
     JCCDCOPFCVaRSolver as _ProblemJCCDCOPFCVaRSolver,
     JCCDCOPFRobustScenarioSolver as _ProblemJCCDCOPFRobustScenarioSolver,
     JCCDCOPFSolver as _ProblemJCCDCOPFSolver,
 )
-from homopt.solvers.core import _normalized_exact_solver_result
+from homopt.solvers.common import _normalized_exact_solver_result
 
 
 class _BaseJCCSolverMixin:
     def solve_result(self, solve_type="opt", x_init=None, solver=None, options=None):
-        if solve_type not in {"opt", "warm_start"}:
+        if solve_type not in {"opt", "initialized_opt"}:
             raise ValueError(f"Unsupported JCC solve_type: {solve_type}")
         warm_start_payload = {}
         if x_init is not None:

@@ -7,6 +7,6 @@ script and benchmark imports.
 
 from __future__ import annotations
 
-from ._core_impl import run_algorithm
+from .registry import run_algorithm
 
 __all__ = ["run_algorithm"]

@@ -1,6 +1,6 @@
 """Equality-focused optimizer layer."""
 
-from ._core_impl import (
+from .registry import (
     EqualityConstrainedALMOptimizer,
     HomALMOptimizer,
     LagrangianOptimizer,

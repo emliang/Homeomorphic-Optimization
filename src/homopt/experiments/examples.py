@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import torch
 
-from homopt.experiments._qcqp_helpers import run_qcqp_learning_route
+from homopt.experiments.benchmarks.qcqp import run_qcqp_learning_route
 from homopt.learning import ConstantPredictor, ProjectionRefiner, summarize_prediction_route
-from homopt.problems import as_learning_problem
-from homopt.problems import ConvexOpt, ToyStarOpt, create_test_problem
+from homopt.problems import ConvexOpt, ParametricProblemBase, ToyStarOpt, create_test_problem
 from homopt.utils import set_global_seed
 
 
@@ -55,22 +54,22 @@ def toy_star_summary(alpha=1.0, num_star=4):
     }
 
 
-class _ToyLearningProblem:
+class _ToyLearningProblem(ParametricProblemBase):
     def __init__(self, n_var=2):
         self.nvar = int(n_var)
         self.is_parametric = True
 
-    def objective(self, x, y):
+    def objective_xy(self, x, y):
         target = 0.5 * x
         return ((y - target) ** 2).sum(dim=-1, keepdim=True)
 
-    def constraint_residual(self, x, y, clip=True):
+    def constraint_residual_xy(self, x, y, clip=True):
         lower = torch.maximum(x - 0.25, torch.full_like(x, -1.0))
         upper = torch.minimum(x + 0.25, torch.full_like(x, 1.0))
         residual = torch.cat([lower - y, y - upper], dim=1)
         return torch.clamp(residual, min=0.0) if clip else residual
 
-    def project(self, x, y):
+    def project_xy(self, x, y):
         lower = torch.maximum(x - 0.25, torch.full_like(x, -1.0))
         upper = torch.minimum(x + 0.25, torch.full_like(x, 1.0))
         return torch.minimum(torch.maximum(y, lower), upper)
@@ -80,7 +79,7 @@ def learning_route_summary(seed=0, n_var=2, n_samples=8, prediction_value=0.0):
     set_global_seed(seed)
     grid = torch.linspace(-0.75, 0.75, steps=n_samples).view(-1, 1)
     x = grid.repeat(1, n_var)
-    problem = as_learning_problem(_ToyLearningProblem(n_var=n_var))
+    problem = _ToyLearningProblem(n_var=n_var)
     predictor = ConstantPredictor(prediction_value)
     refiner = ProjectionRefiner()
     summary = summarize_prediction_route(problem, x, predictor, refiner)

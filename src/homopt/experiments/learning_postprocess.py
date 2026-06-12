@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from .benchmarks_parametric import qcqp_learning_benchmark, qcqp_route_comparison
+from .benchmarks.convex_parametric_learning import convex_parametric_learning_benchmark
+from .benchmarks.qcqp import qcqp_learning_benchmark, qcqp_route_comparison
 
 __all__ = [
+    "convex_parametric_learning_benchmark",
     "qcqp_learning_benchmark",
     "qcqp_route_comparison",
 ]

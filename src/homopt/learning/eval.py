@@ -9,12 +9,12 @@ import torch
 from homopt.problems import normalize_constraint_violation
 
 
-def _objective_xy(problem, x, y, objective_batch=None):
+def _objective_xy(problem, input_params, y, objective_batch=None):
     objective_fn = problem.objective_xy
     signature = inspect.signature(objective_fn)
     if "objective_batch" in signature.parameters:
-        return objective_fn(x, y, objective_batch=objective_batch)
-    return objective_fn(x, y)
+        return objective_fn(input_params, y, objective_batch=objective_batch)
+    return objective_fn(input_params, y)
 
 
 def _solution_error(prediction, reference):
@@ -30,7 +30,7 @@ def _solution_error(prediction, reference):
 
 def summarize_prediction_route(
     problem,
-    x,
+    input_params,
     predictor,
     refiner,
     tol=1e-8,
@@ -38,15 +38,15 @@ def summarize_prediction_route(
     objective_batch=None,
     reference_y=None,
 ):
-    """Evaluate a predictor and optional refiner on a shared `(x, y)` problem contract."""
+    """Evaluate a predictor and optional refiner on a shared `(input_params, y)` contract."""
 
-    raw_y = predictor.predict(x)
-    refined_y = refiner.refine(problem, x, raw_y)
+    raw_y = predictor.predict(input_params)
+    refined_y = refiner.refine(problem, input_params, raw_y)
 
-    raw_obj = _objective_xy(problem, x, raw_y, objective_batch=objective_batch)
-    refined_obj = _objective_xy(problem, x, refined_y, objective_batch=objective_batch)
-    raw_cons = normalize_constraint_violation(problem.constraint_residual_xy(x, raw_y, clip=False))
-    refined_cons = normalize_constraint_violation(problem.constraint_residual_xy(x, refined_y, clip=False))
+    raw_obj = _objective_xy(problem, input_params, raw_y, objective_batch=objective_batch)
+    refined_obj = _objective_xy(problem, input_params, refined_y, objective_batch=objective_batch)
+    raw_cons = normalize_constraint_violation(problem.constraint_residual_xy(input_params, raw_y, clip=False))
+    refined_cons = normalize_constraint_violation(problem.constraint_residual_xy(input_params, refined_y, clip=False))
 
     raw_violation = raw_cons.max(dim=1)[0]
     refined_violation = refined_cons.max(dim=1)[0]
@@ -67,7 +67,7 @@ def summarize_prediction_route(
     }
     if reference_y is not None:
         reference_y = reference_y.to(dtype=raw_y.dtype, device=raw_y.device)
-        reference_obj = _objective_xy(problem, x, reference_y, objective_batch=objective_batch)
+        reference_obj = _objective_xy(problem, input_params, reference_y, objective_batch=objective_batch)
         denom = torch.clamp(reference_obj.abs(), min=1e-12)
         raw_error = _solution_error(raw_y, reference_y)
         refined_error = _solution_error(refined_y, reference_y)

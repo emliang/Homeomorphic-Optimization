@@ -14,7 +14,7 @@ def _flatten_context_input(input_tensor):
 
 
 class NeuralDecisionPredictor(BasePredictor):
-    """Neural predictor that emits decisions in the original QCQP variable space."""
+    """Neural predictor that emits decisions in the physical decision space."""
 
     name = "nn_decision"
 
@@ -22,13 +22,13 @@ class NeuralDecisionPredictor(BasePredictor):
         self.model = model
         self.problem = problem
 
-    def predict(self, x, **kwargs):
+    def predict(self, input_params, **kwargs):
         del kwargs
         self.model.eval()
         with torch.inference_mode():
-            latent = self.model(_flatten_context_input(x))
-            scaled = self.problem.scale(x, latent)
-            return self.problem.complete_partial(x, scaled)
+            u = self.model(_flatten_context_input(input_params))
+            y_partial = self.problem.scale(input_params, u)
+            return self.problem.complete_partial(input_params, y_partial)
 
 
 __all__ = ["NeuralDecisionPredictor"]

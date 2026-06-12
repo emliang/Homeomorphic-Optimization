@@ -1,7 +1,7 @@
 """Visualization namespace."""
 
-from ._coninn_impl import evaluate_coninn_exactness, visualize_coninn_exactness
-from ._convex2d_impl import save_convex_2d_visualizations
+from .coninn import evaluate_coninn_exactness, visualize_coninn_exactness
+from .convex2d import save_convex_2d_visualizations
 from .comparison import save_comparison_visualizations
 from .inn_training import save_inn_training_visualizations
 from .style import (
@@ -16,7 +16,7 @@ from .traces import (
     build_convex_2d_traces,
     split_convex_metrics,
 )
-from ._mdh_impl import visualize_mdh_mapping_transformation
+from .mdh import visualize_mdh_mapping_transformation
 
 __all__ = [
     "ALGORITHM_COLORS",
