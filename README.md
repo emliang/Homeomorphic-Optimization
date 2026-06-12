@@ -338,9 +338,9 @@ url={https://openreview.net/forum?id=bP5cU0OYSn}
 }
 
 @inproceedings{
-anonymous2026hompgd,
+liu2026hompgd,
 title={Hom-{PGD}\${\textasciicircum}+\$: Fast Reparameterized Optimization over Non-convex Ball-Homeomorphic Set},
-author={Anonymous},
+author={Chenghao Liu and Enming Liang and Minghua Chen},
 booktitle={Forty-third International Conference on Machine Learning},
 year={2026},
 url={https://openreview.net/forum?id=cOKyRhR8uZ}
