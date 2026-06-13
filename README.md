@@ -9,93 +9,89 @@
   <img src="Webpage/Hom.png" alt="Homeomorphic transformation intuition" width="900">
 </p>
 
-Homeomorphic Optimization is a research package and user guide for constrained
-optimization with homeomorphic maps. The current public-facing focus is
-**Hom-PGD**: a projected-gradient-style method that optimizes in a latent space
-while a homeomorphic or gauge map keeps decision variables inside the target
-inequality-constrained feasible set.
+Homeomorphic Optimization is a research package for constrained optimization
+with homeomorphic maps. The current public-facing focus is **Hom-PGD**, a
+projection-free first-order method that optimizes in a latent space while a
+homeomorphic or gauge map keeps decisions inside the target feasible set.
 
-The package is designed for users who want to understand the method, run the
-included experiments, and adapt the implementation to new inequality-constrained
-optimization problems.
+This README is written for users who want to understand Hom-PGD, run the
+included experiments, and extend the codebase with new instances or algorithms.
+Other methods are present in `src/homopt/`, but are intentionally not documented
+in detail here yet.
 
-## Where to Start
+## Installation
 
-Start with these files and modules:
+```bash
+git clone https://github.com/<user-or-org>/Homeomorphic-Optimization.git
+cd Homeomorphic-Optimization
+pip install -e .
+```
 
-- `README.md`: high-level package overview and Hom-PGD user guide.
-- `scripts/hom_pgd/`: editable Hom-PGD experiment scripts.
-- `scripts/hom_pgd/_configs.py`: shared defaults for the Hom-PGD scripts.
-- `src/homopt/experiments/hom_pgd.py`: public Hom-PGD experiment entrypoints.
-- `src/homopt/experiments/benchmarks/`: benchmark implementations used by the scripts.
-- `src/homopt/experiments/common/`: shared configuration, recording, labeling, and comparison helpers.
+For experiment workflows:
 
-## Supported Methods
+```bash
+pip install -e ".[dev,research,solvers,viz,models]"
+```
 
-The current README documents **Hom-PGD** in detail.
+### Requirements
 
-| Method | Status in This README | Purpose |
-| --- | --- | --- |
-| `Hom-PGD` | Detailed | Inequality-constrained optimization through a latent-to-feasible map. |
-| `PGD` | Baseline | Project in decision space after gradient steps. |
-| `FW` | Baseline | Use a linearized subproblem for feasible descent. |
-| `RD` | Baseline | Radial-dual style comparison route. |
-| `ALM` | Baseline in selected comparisons | Penalty/dual baseline for constrained optimization. |
-| `Hom-ALM`, `INN-PGD`, learning post-processing | Not covered here yet | Present in the package, but intentionally omitted from this user page for now. |
+- Python >= 3.7
+- NumPy
+- PyTorch
+- Optional experiment dependencies: SciPy, NetworkX, CVXPY, Pyomo,
+  Matplotlib, pandas, seaborn, torchvision, pypower
+
+After installation, a quick import check is:
+
+```bash
+python -c "import homopt; from homopt.experiments.hom_pgd import convex_algorithm_comparison; print('homopt import OK')"
+```
+
+## Quick Start
+
+Recommended first run:
+
+```bash
+python scripts/hom_pgd/run_poly_star_compare.py
+```
+
+This 2D poly/star experiment is small, visual, and useful for checking the full
+workflow before moving to larger instances.
+
+Then try:
+
+```bash
+python scripts/hom_pgd/run_convex_ineq_compare.py
+python scripts/hom_pgd/run_maxcut_sdp_compare.py
+```
+
+Runs write outputs under `results/hom_pgd/`.
 
 ## Hom-PGD
 
-Hom-PGD targets problems of the form:
+Hom-PGD targets constrained problems of the form
 
 $$
 \begin{aligned}
-\min_{x} \quad & f(x) \\
+\min_x \quad & f(x) \\
 \text{s.t.} \quad & x \in \mathcal{C}.
 \end{aligned}
 $$
 
-where $\mathcal{C}$ is an inequality-defined feasible set that can be represented by a
-homeomorphic, gauge, star-shaped, or related latent-to-decision map.
-
-Instead of iterating directly on $x$, Hom-PGD introduces a latent variable $z$
-and a map:
+Instead of updating $x$ directly and projecting back to $\mathcal{C}$,
+Hom-PGD introduces a latent variable $z$ and a feasible-set map
 
 $$
 x = \psi(z).
 $$
 
-The optimizer updates $z$, evaluates the objective through $x = \psi(z)$, and
-records the resulting feasible decision trajectory.
-
-<p align="center">
-  <img src="Webpage/Hom-PGD_framework.png" alt="PGD and Hom-PGD comparison framework" width="900">
-</p>
-
-The figure contrasts the two viewpoints. PGD works in the original decision
-space and must handle the feasible set $\mathcal{K}$ directly. Hom-PGD uses a
-homeomorphic mapping $\psi$ to move between the original decision variable $x$
-and a latent variable $z$, turning the objective into
+The transformed objective is
 
 $$
-h(z) = f(\psi(z))
+h(z) = f(\psi(z)),
 $$
 
-and the feasible region into a simpler latent set
-
-$$
-\mathcal{B} = \psi^{-1}(\mathcal{K}).
-$$
-
-### Why Use Hom-PGD?
-
-Classical projected gradient methods follow this pattern:
-
-$$
-x_{k+1} =
-\Pi_{\mathcal{C}}\!\left(x_k - \eta \nabla f(x_k)\right).
-$$
-
-Hom-PGD changes the pattern:
+and the update is performed in latent space:
 
 $$
 \begin{aligned}
@@ -104,241 +100,60 @@ x_{k+1} &= \psi(z_{k+1}).
 \end{aligned}
 $$
 
-This is useful when repeated projection is expensive, unstable, or less natural
-than parameterizing the feasible geometry directly.
+<p align="center">
+  <img src="Webpage/Hom-PGD_framework.png" alt="PGD and Hom-PGD comparison framework" width="900">
+</p>
 
-### What the Map Does
-
-The map $\psi$ is the main modeling object. In the current package it can encode
-several inequality geometries used by the Hom-PGD experiments:
+The main modeling object is the map $\psi$. In this repository, Hom-PGD
+experiments cover:
 
 - convex SOCP-style feasible regions through gauge maps;
 - 2D polytope and star-shaped toy feasible sets;
-- MaxCut SDP-style comparison routes;
-- adversarial-attack feasible balls and related norm constraints.
+- MaxCut SDP-style feasible regions;
+- adversarial-attack feasible balls and weighted norm constraints.
 
-For a user, the important mental model is:
+## Experiments
 
-```text
-problem:      defines f(x) and constraints
-map:          converts latent z into feasible or geometry-aware x
-optimizer:    updates z and records objective/violation traces
-experiment:   compares Hom-PGD against baselines under the same budget
-```
+| File | Purpose |
+| --- | --- |
+| `scripts/hom_pgd/run_poly_star_compare.py` | Recommended first run; 2D polytope, star-shaped, or intersection toy set. |
+| `scripts/hom_pgd/run_convex_ineq_compare.py` | Main convex inequality/SOCP comparison. |
+| `scripts/hom_pgd/run_maxcut_sdp_compare.py` | MaxCut SDP-style comparison. |
+| `scripts/hom_pgd/run_adversarial_attack.py` | Norm-constrained adversarial attack workflow. |
+| `scripts/hom_pgd/_configs.py` | Shared defaults and run-label helpers. |
 
-### Hom-PGD Configuration
+Each script is intentionally editable. The usual workflow is:
 
-The main editable Hom-PGD SOCP script is:
+1. Open a `scripts/hom_pgd/run_*.py` file.
+2. Edit `QUICK_OVERRIDES` for routine changes.
+3. Use `INSTANCE_OVERRIDES` for multiple problem sizes or seeds.
+4. Run the script directly.
+5. Inspect `results/hom_pgd/<experiment>/`.
 
-```text
-scripts/hom_pgd/run_convex_ineq_compare.py
-```
+### Configuration
 
-Shared script defaults live in:
+Parameter layers are applied in this order:
 
 ```text
 scripts/hom_pgd/_configs.py
-```
-
-It compares:
-
-```python
-["PGD", "FW", "ALM", "RD", "Hom-PGD"]
-```
-
-
-Common controls include:
-
-| Parameter | Meaning |
-| --- | --- |
-| `learning_rate` | Latent-space step size. |
-| `stepsize_rule` | Step-size policy, such as `adaptive`, `constant`, or `diminish`. |
-| `hom_p_norm` | Norm used by the latent ball projection route. |
-| `momentum` | Momentum for the update backend when enabled. |
-| `max_iterations` | Shared iteration budget. For ALM-family methods this is aligned to the outer-loop budget. |
-| `max_running_time` | Wall-clock budget for an experiment run. |
-| `initial_point_mode` | Initial point policy; current Hom-PGD configs default to `gauge_center`. |
-| `visualize` | Whether to write plots and comparison artifacts. |
-| `visualize_only` | Reuse stored artifacts without rerunning the experiment. |
-
-Per-method overrides go under `algorithm_config`, while shared controls go under
-`common_config`. For routine experiments, edit `QUICK_OVERRIDES` in the target
-script first.
-
-## Installation
-
-Clone the repository and install the package in editable mode:
-
-```bash
-git clone https://github.com/<user-or-org>/Homeomorphic-Optimization.git
-cd Homeomorphic-Optimization
-pip install -e .
-```
-
-For development and experiment workflows:
-
-```bash
-pip install -e .[dev,research,solvers,viz,models]
-```
-
-## Requirements
-
-Base package:
-
-- Python >= 3.7
-- NumPy
-- PyTorch
-
-Optional experiment groups:
-
-- `dev`: pytest
-- `research`: SciPy, NetworkX, power-system helpers
-- `solvers`: CVXPY and Pyomo routes
-- `viz`: Matplotlib, pandas, seaborn
-- `models`: torchvision and model-adjacent dependencies
-
-## Quick Start
-
-Recommended first step: run the 2D poly/star-shaped feasible-set comparison.
-It is the easiest script for checking the end-to-end workflow because the
-problem is small, visual, and quick to edit.
-
-```bash
-python scripts/hom_pgd/run_poly_star_compare.py
-```
-
-Then run the main Hom-PGD inequality comparison:
-
-```bash
-python scripts/hom_pgd/run_convex_ineq_compare.py
-```
-
-Run the MaxCut SDP Hom-PGD comparison:
-
-```bash
-python scripts/hom_pgd/run_maxcut_sdp_compare.py
-```
-
-## Hom-PGD Experiment Scripts
-
-| Script | Purpose |
-| --- | --- |
-| `scripts/hom_pgd/_configs.py` | Shared defaults and run-label helpers for the Hom-PGD scripts. |
-| `scripts/hom_pgd/run_convex_ineq_compare.py` | Main convex inequality/SOCP comparison. |
-| `scripts/hom_pgd/run_poly_star_compare.py` | 2D polytope, star-shaped, or intersection toy set. |
-| `scripts/hom_pgd/run_maxcut_sdp_compare.py` | MaxCut SDP-style Hom-PGD comparison. |
-| `scripts/hom_pgd/run_adversarial_attack.py` | Norm-constrained adversarial-attack workflow. |
-
-Each script is intentionally editable. The intended workflow is:
-
-1. Open the relevant `scripts/hom_pgd/run_*.py` file.
-2. Modify `BASE_PARAMS`, `QUICK_OVERRIDES`, or instance overrides.
-3. Run the script directly.
-4. Inspect the generated result folder under `results/hom_pgd/`.
-
-## Development Workflow
-
-For new Hom-PGD experiments, use the 2D poly/star script as the first
-development target. It gives fast feedback on instance construction, algorithm
-dispatch, result recording, and visualization before moving to larger SOCP,
-MaxCut, or adversarial workflows.
-
-### Add a New Instance
-
-An instance is one concrete problem geometry and objective. The recommended path
-is:
-
-1. Define or extend the problem class under `src/homopt/problems/`.
-   Deterministic problems should expose `objective_x(x)` and
-   `constraint_x(x, clip=True)`. Add `project(x)` only when projection-based
-   baselines such as `PGD` need a custom projection.
-2. Add the feasible-set map under `src/homopt/mappings/` when Hom-PGD needs a
-   new latent-to-decision transformation. For gauge-style sets, follow
-   `src/homopt/mappings/gauge/`; for toy star-shaped sets, follow
-   `src/homopt/mappings/star.py`.
-3. Add a benchmark builder under `src/homopt/experiments/benchmarks/`. The
-   benchmark should build the problem, build the map, prepare algorithm params,
-   call `run_algorithm(...)`, summarize records, and save visualizations.
-4. Export the benchmark from `src/homopt/experiments/hom_pgd.py` if it should
-   become a public Hom-PGD entrypoint.
-5. Add or extend an editable script under `scripts/hom_pgd/`. Keep the script
-   thin: define `BASE_PARAMS`, `QUICK_OVERRIDES`, optional
-   `INSTANCE_OVERRIDES`, then call `make_benchmark_entrypoint(...)`.
-6. Start with one small instance. After it runs, add multiple instances through
-   `INSTANCE_OVERRIDES` as `(scale_label, overrides)` pairs. If `scale_label` is
-   `None`, the script can build a label from the final problem dimensions.
-
-For existing poly/star or SOCP instances, most changes only require editing the
-script-level config: `problem_type`, `alpha`, `num_star`, `poly_config`,
-`n_var`, `n_linear_cons`, `n_soc_cons`, `n_qua_cons`, bounds, seeds, and
-objective/constraint type fields.
-
-### Add a New Algorithm
-
-An algorithm is a method that can be selected in the script-level `algorithms`
-list. The recommended path is:
-
-1. Implement the optimizer under `src/homopt/optim/`. First-order methods
-   usually belong in `src/homopt/optim/first_order.py`; ALM-style methods belong
-   in the ALM or Lagrangian modules. Follow the existing `optimize(...)`
-   contract: return final decision, decision trajectory, objective trajectory,
-   violation trajectory, and per-iteration timing. If the algorithm transforms
-   through a map, also return or expose the transform timing and latent
-   trajectory consistently with `HomPGDOptimizer`.
-2. Register the algorithm name in `src/homopt/optim/registry.py` inside
-   `_algorithm_specs()`. The registry decides which optimizer class to build and
-   whether the run result includes map transform time.
-3. Add default parameter construction in
-   `src/homopt/experiments/common/method_specs.py` when the algorithm should
-   participate in shared benchmark builders.
-4. Add the algorithm name to the target benchmark's `algorithms` list and add
-   per-method defaults or overrides under `algorithm_config`.
-5. Run the smallest compatible script first, usually
-   `scripts/hom_pgd/run_poly_star_compare.py`, then move to larger benchmarks.
-
-Use `common_config` for shared controls such as `max_iterations`,
-`max_running_time`, `learning_rate`, `stepsize_rule`, `momentum`, and
-`initial_point_mode`. Use `algorithm_config` for method-specific controls such
-as Hom-PGD's `hom_p_norm`, PGD projection subproblem settings, or an algorithm's
-own learning rate.
-
-For ALM-family baselines, `common_config.max_iterations` is treated as the
-shared outer-loop budget. Do not set a conflicting `outer_iterations` inside a
-per-method override.
-
-### Config Flow
-
-Script parameters are layered in this order:
-
-```text
-shared defaults in scripts/hom_pgd/_configs.py
-  -> BASE_PARAMS in the selected run script
+  -> BASE_PARAMS in the selected script
   -> QUICK_OVERRIDES
   -> INSTANCE_OVERRIDES, when present
 ```
 
-### Experiment Flow
+Use `common_config` for shared controls such as `max_iterations`,
+`max_running_time`, `learning_rate`, `stepsize_rule`, `momentum`, and
+`initial_point_mode`. Use `algorithm_config` for per-method settings such as
+Hom-PGD's `hom_p_norm`, PGD projection settings, or method-specific learning
+rates.
 
-The script flow is intentionally simple:
+For ALM-family baselines, `common_config.max_iterations` is aligned to the
+outer-loop budget. Avoid setting a conflicting `outer_iterations` inside a
+per-method override.
 
-```text
-run_*.py
-  -> merge BASE_PARAMS and QUICK_OVERRIDES
-  -> optionally expand INSTANCE_OVERRIDES
-  -> call src/homopt/experiments/hom_pgd.py
-  -> run the benchmark under src/homopt/experiments/benchmarks/
-  -> record config, result, traces, and figures under results/hom_pgd/
-```
+### Result Artifacts
 
-When adding a new experiment, keep the script thin. Put reusable benchmark logic
-under `src/homopt/experiments/benchmarks/`, shared config or labeling helpers in
-`scripts/hom_pgd/_configs.py` or `src/homopt/experiments/common/`, and leave
-the top-level script as the editable user entrypoint.
-
-## Result Artifacts
-
-Experiment runs write compact summaries and method records under `results/`.
-A typical comparison contains:
+A typical run writes:
 
 ```text
 config.json
@@ -352,63 +167,65 @@ artifacts/
     ...
 ```
 
-Use:
+Use `summary.json` for method-level metrics, `records/<method>.npy` for full
+iteration traces, and generated figures for objective, objective gap,
+feasibility, and comparison plots.
 
-- `summary.json` for method-level metrics;
-- `records/<method>.npy` for full iteration traces;
-- generated figures for convergence, feasibility, and method comparisons.
+## Development Guide
+
+### Add a New Instance
+
+1. Define or extend a problem under `src/homopt/problems/`. Deterministic
+   problems should expose `objective_x(x)` and `constraint_x(x, clip=True)`.
+2. Add a map under `src/homopt/mappings/` if Hom-PGD needs a new
+   latent-to-decision transformation. Gauge-style maps live under
+   `src/homopt/mappings/gauge/`.
+3. Add a benchmark under `src/homopt/experiments/benchmarks/`. The benchmark
+   should build the problem, build the map, prepare algorithm params, call
+   `run_algorithm(...)`, summarize records, and save artifacts.
+4. Export the benchmark from `src/homopt/experiments/hom_pgd.py` if it should
+   become a public Hom-PGD entrypoint.
+5. Add a thin editable script under `scripts/hom_pgd/`.
+
+### Add a New Algorithm
+
+1. Implement the optimizer under `src/homopt/optim/`. First-order methods
+   usually belong in `src/homopt/optim/first_order.py`.
+2. Register the algorithm in `src/homopt/optim/registry.py` inside
+   `_algorithm_specs()`.
+3. Add default parameter construction in
+   `src/homopt/experiments/common/method_specs.py` if the algorithm should
+   participate in shared benchmarks.
+4. Add the algorithm name to the target benchmark or script `algorithms` list.
+5. Start testing with `scripts/hom_pgd/run_poly_star_compare.py`, then move to
+   larger workflows.
 
 ## Package Layout
 
 ```text
 src/homopt/
-  problems/                Problem definitions
-    convex/                Convex inequality, MaxCut, and toy-set problems
-    convex_parametric/     Parametric convex problem families
-    jcc/                   Joint chance-constrained problem families
-    qcqp/                  QCQP problem families
-    stiefel/               Stiefel-manifold equality problems
-  mappings/                Gauge, star, and homeomorphic maps
-    gauge/                 Gauge-map implementation and explicit derivatives
-  optim/                   Optimizer loops, ALM routes, and dispatch
-  experiments/             Reproducible workloads and result persistence
-    hom_pgd.py             Public Hom-PGD experiment entrypoints
-    benchmarks/            Benchmark implementations
-    common/                Shared experiment helpers
-    adversarial/           Adversarial-attack workflow
-  solvers/                 Baseline solver wrappers
-  viz/                     Plotting and artifact helpers
+  problems/       Problem definitions
+  mappings/       Gauge, star, and homeomorphic maps
+  optim/          Optimizer loops and algorithm dispatch
+  experiments/    Benchmarks, config helpers, and result persistence
+  solvers/        Baseline solver wrappers
+  viz/            Plotting and artifact helpers
 
-scripts/hom_pgd/  Hom-PGD experiment entrypoints
-```
-
-The repository includes the full `homopt` package source so shared internals
-remain importable. The public-facing scripts and this README currently focus on
-Hom-PGD.
-
-## Build from Source
-
-For local development:
-
-```bash
-pip install -e .[dev,research,solvers,viz,models]
-```
-
-After installation, a quick import smoke check is:
-
-```bash
-python -c "import homopt; from homopt.experiments.hom_pgd import convex_algorithm_comparison; print('homopt import OK')"
+scripts/hom_pgd/  Editable Hom-PGD experiment entrypoints
 ```
 
 ## Roadmap
 
-This README currently focuses on Hom-PGD. Future user-facing documentation can
-add separate pages for:
+This README currently focuses on Hom-PGD. The next development step is to merge
+homeomorphic projection with neural network predictors for parametric problems:
+predict a decision or latent warm start from problem parameters, map or refine
+it through the homeomorphic projection route, and compare prediction-only,
+projection-refined, and optimization-refined solutions under the same benchmark
+protocol.
 
-- Hom-ALM and proximal Hom-ALM;
-- INN-PGD and learned feasible maps;
-- neural prediction plus optimization-based post-processing;
-- solver-specific benchmark setup and reproducibility notes.
+Future documentation can add separate pages for Hom-ALM, INN-PGD, learned
+feasible maps, neural prediction plus post-processing, and solver-specific
+reproducibility notes.
 
 ## Status
 
