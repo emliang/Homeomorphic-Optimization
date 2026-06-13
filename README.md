@@ -199,16 +199,18 @@ Optional experiment groups:
 
 ## Quick Start
 
-Run the main Hom-PGD inequality comparison:
-
-```bash
-python scripts/hom_pgd/run_convex_ineq_compare.py
-```
-
-Run the 2D poly/star-shaped feasible-set comparison:
+Recommended first step: run the 2D poly/star-shaped feasible-set comparison.
+It is the easiest script for checking the end-to-end workflow because the
+problem is small, visual, and quick to edit.
 
 ```bash
 python scripts/hom_pgd/run_poly_star_compare.py
+```
+
+Then run the main Hom-PGD inequality comparison:
+
+```bash
+python scripts/hom_pgd/run_convex_ineq_compare.py
 ```
 
 Run the MaxCut SDP Hom-PGD comparison:
@@ -233,6 +235,105 @@ Each script is intentionally editable. The intended workflow is:
 2. Modify `BASE_PARAMS`, `QUICK_OVERRIDES`, or instance overrides.
 3. Run the script directly.
 4. Inspect the generated result folder under `results/hom_pgd/`.
+
+## Development Workflow
+
+For new Hom-PGD experiments, use the 2D poly/star script as the first
+development target. It gives fast feedback on instance construction, algorithm
+dispatch, result recording, and visualization before moving to larger SOCP,
+MaxCut, or adversarial workflows.
+
+### Add a New Instance
+
+An instance is one concrete problem geometry and objective. The recommended path
+is:
+
+1. Define or extend the problem class under `src/homopt/problems/`.
+   Deterministic problems should expose `objective_x(x)` and
+   `constraint_x(x, clip=True)`. Add `project(x)` only when projection-based
+   baselines such as `PGD` need a custom projection.
+2. Add the feasible-set map under `src/homopt/mappings/` when Hom-PGD needs a
+   new latent-to-decision transformation. For gauge-style sets, follow
+   `src/homopt/mappings/gauge/`; for toy star-shaped sets, follow
+   `src/homopt/mappings/star.py`.
+3. Add a benchmark builder under `src/homopt/experiments/benchmarks/`. The
+   benchmark should build the problem, build the map, prepare algorithm params,
+   call `run_algorithm(...)`, summarize records, and save visualizations.
+4. Export the benchmark from `src/homopt/experiments/hom_pgd.py` if it should
+   become a public Hom-PGD entrypoint.
+5. Add or extend an editable script under `scripts/hom_pgd/`. Keep the script
+   thin: define `BASE_PARAMS`, `QUICK_OVERRIDES`, optional
+   `INSTANCE_OVERRIDES`, then call `make_benchmark_entrypoint(...)`.
+6. Start with one small instance. After it runs, add multiple instances through
+   `INSTANCE_OVERRIDES` as `(scale_label, overrides)` pairs. If `scale_label` is
+   `None`, the script can build a label from the final problem dimensions.
+
+For existing poly/star or SOCP instances, most changes only require editing the
+script-level config: `problem_type`, `alpha`, `num_star`, `poly_config`,
+`n_var`, `n_linear_cons`, `n_soc_cons`, `n_qua_cons`, bounds, seeds, and
+objective/constraint type fields.
+
+### Add a New Algorithm
+
+An algorithm is a method that can be selected in the script-level `algorithms`
+list. The recommended path is:
+
+1. Implement the optimizer under `src/homopt/optim/`. First-order methods
+   usually belong in `src/homopt/optim/first_order.py`; ALM-style methods belong
+   in the ALM or Lagrangian modules. Follow the existing `optimize(...)`
+   contract: return final decision, decision trajectory, objective trajectory,
+   violation trajectory, and per-iteration timing. If the algorithm transforms
+   through a map, also return or expose the transform timing and latent
+   trajectory consistently with `HomPGDOptimizer`.
+2. Register the algorithm name in `src/homopt/optim/registry.py` inside
+   `_algorithm_specs()`. The registry decides which optimizer class to build and
+   whether the run result includes map transform time.
+3. Add default parameter construction in
+   `src/homopt/experiments/common/method_specs.py` when the algorithm should
+   participate in shared benchmark builders.
+4. Add the algorithm name to the target benchmark's `algorithms` list and add
+   per-method defaults or overrides under `algorithm_config`.
+5. Run the smallest compatible script first, usually
+   `scripts/hom_pgd/run_poly_star_compare.py`, then move to larger benchmarks.
+
+Use `common_config` for shared controls such as `max_iterations`,
+`max_running_time`, `learning_rate`, `stepsize_rule`, `momentum`, and
+`initial_point_mode`. Use `algorithm_config` for method-specific controls such
+as Hom-PGD's `hom_p_norm`, PGD projection subproblem settings, or an algorithm's
+own learning rate.
+
+For ALM-family baselines, `common_config.max_iterations` is treated as the
+shared outer-loop budget. Do not set a conflicting `outer_iterations` inside a
+per-method override.
+
+### Config Flow
+
+Script parameters are layered in this order:
+
+```text
+shared defaults in scripts/hom_pgd/_configs.py
+  -> BASE_PARAMS in the selected run script
+  -> QUICK_OVERRIDES
+  -> INSTANCE_OVERRIDES, when present
+```
+
+### Experiment Flow
+
+The script flow is intentionally simple:
+
+```text
+run_*.py
+  -> merge BASE_PARAMS and QUICK_OVERRIDES
+  -> optionally expand INSTANCE_OVERRIDES
+  -> call src/homopt/experiments/hom_pgd.py
+  -> run the benchmark under src/homopt/experiments/benchmarks/
+  -> record config, result, traces, and figures under results/hom_pgd/
+```
+
+When adding a new experiment, keep the script thin. Put reusable benchmark logic
+under `src/homopt/experiments/benchmarks/`, shared config or labeling helpers in
+`scripts/hom_pgd/_configs.py` or `src/homopt/experiments/common/`, and leave
+the top-level script as the editable user entrypoint.
 
 ## Result Artifacts
 
