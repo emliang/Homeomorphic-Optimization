@@ -111,15 +111,7 @@ class MaxCutSDP(TensorRuntimeMixin):
                 violation = (self.constraint_x(x_detached, clip=False) * dual_var).sum(-1)
             grad = torch.autograd.grad(violation, x_detached, create_graph=False)[0]
         else:
-            # Finite difference approximation
-            epsilon = 1e-6
-            grad = torch.zeros_like(x)
-            for i in range(x.shape[1]):
-                delta = torch.zeros_like(x)
-                delta[:, i] = epsilon
-                obj_plus = self.constraint_x(x + delta)
-                obj_minus = self.constraint_x(x - delta)
-                grad[:, i] = (obj_plus - obj_minus) / (2 * epsilon)
+            raise ValueError(f"Unsupported MaxCut constraint gradient method: {method}")
         return grad
 
     def gradient_penalty_x(self, x):
@@ -140,7 +132,7 @@ class MaxCutSDP(TensorRuntimeMixin):
         # return self.objective_x(x)
         return self.regularized_objective_x(x, reg=1e-5) #+ 1e-5 * z.square().sum().view(1,-1)
 
-    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd"):
+    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd", x=None, hom_state=None):
         """Compute gradient of objective function with respect to z using chain rule
         Args:
             z: input points in unit ball (batch_size x n)
@@ -156,20 +148,12 @@ class MaxCutSDP(TensorRuntimeMixin):
         elif method == 'explicit':
             if hom_map is None:
                 raise ValueError("hom_map is required for explicit MaxCut z-space objective gradient.")
-            x, hom_state = hom_map.forward(z, method=hom_map_method, return_state=True)
+            if x is None:
+                x, hom_state = hom_map.forward(z, method=hom_map_method, return_state=True)
             grad_x = self.gradient_objective_x(x) + 2e-5 * x
             grad_z = hom_map.vjp(z, grad_x, method=hom_map_method, state=hom_state)
-        elif method == 'finite_diff':
-            epsilon = 1e-6
-            grad_z = torch.zeros_like(z)
-            for i in range(z.shape[1]):
-                delta = torch.zeros_like(z)
-                delta[:, i] = epsilon
-                obj_plus = self.objective_z(z + delta, hom_map)
-                obj_minus = self.objective_z(z - delta, hom_map)
-                grad_z[:, i] = (obj_plus - obj_minus) / (2 * epsilon)
         else:
-            raise NotImplementedError
+            raise ValueError(f"Unsupported MaxCut z-objective gradient method: {method}")
         return grad_z
 
     def radial_primal_obj(self, x, hom_map=None):

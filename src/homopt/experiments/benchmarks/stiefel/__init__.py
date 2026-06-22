@@ -1,62 +1,7 @@
-"""Stiefel benchmark family."""
+"""Stiefel benchmark family public entrypoints."""
 
 from __future__ import annotations
 
-from .compare import (
-    STIEFEL_HOM_OPTIMIZER_ALGORITHMS,
-    STIEFEL_OPTIMIZER_ALGORITHMS,
-    STIEFEL_PLOT_ALGORITHM_ORDER,
-    STIEFEL_PLOT_LABELS,
-    STIEFEL_SOLVER_RUNNERS,
-    _algorithm_config,
-    _build_alm_params,
-    _outer_config,
-    _run_stiefel_ipopt,
-    _run_stiefel_retraction_penalty,
-    _stiefel_nested_solver_base_params,
-    _stiefel_penalty_solver_base_params,
-    run_algorithm,
-    save_comparison_visualizations,
-    stiefel_algorithm_comparison,
-)
-from .setup import (
-    STIEFEL_REFERENCE_CACHE_FILENAME,
-    STIEFEL_REFERENCE_CACHE_VERSION,
-    build_stiefel_config,
-    build_stiefel_hom_map,
-    build_stiefel_initial_point,
-    build_stiefel_problem,
-    load_stiefel_data,
-    load_stiefel_reference_cache,
-    pca_covariance_from_data,
-    resolve_stiefel_restricted_rows,
-    save_stiefel_reference_cache,
-    stiefel_reference_cache_key,
-    stiefel_reference_cache_path,
-    stiefel_reference_solver_params,
-)
+from .compare import stiefel_algorithm_comparison
 
-__all__ = [
-    "STIEFEL_HOM_OPTIMIZER_ALGORITHMS",
-    "STIEFEL_OPTIMIZER_ALGORITHMS",
-    "STIEFEL_PLOT_ALGORITHM_ORDER",
-    "STIEFEL_PLOT_LABELS",
-    "STIEFEL_REFERENCE_CACHE_FILENAME",
-    "STIEFEL_REFERENCE_CACHE_VERSION",
-    "STIEFEL_SOLVER_RUNNERS",
-    "build_stiefel_config",
-    "build_stiefel_hom_map",
-    "build_stiefel_initial_point",
-    "build_stiefel_problem",
-    "load_stiefel_data",
-    "load_stiefel_reference_cache",
-    "pca_covariance_from_data",
-    "resolve_stiefel_restricted_rows",
-    "run_algorithm",
-    "save_comparison_visualizations",
-    "save_stiefel_reference_cache",
-    "stiefel_algorithm_comparison",
-    "stiefel_reference_cache_key",
-    "stiefel_reference_cache_path",
-    "stiefel_reference_solver_params",
-]
+__all__ = ["stiefel_algorithm_comparison"]

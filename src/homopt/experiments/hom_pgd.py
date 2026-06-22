@@ -9,7 +9,7 @@ from __future__ import annotations
 from .adversarial.experiment import adversarial_attack_experiment
 from .benchmarks.convex import convex_algorithm_comparison, socp_hompgd_benchmark
 from .benchmarks.maxcut import maxcut_algorithm_comparison
-from .benchmarks.toy_star import poly_star_benchmark
+from .benchmarks.star import poly_star_benchmark
 
 __all__ = [
     "adversarial_attack_experiment",

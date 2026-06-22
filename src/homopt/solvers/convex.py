@@ -175,6 +175,7 @@ class ConvexSolver:
         penalty_coef=None,
         proximal_coef=None,
         x_outer=None,
+        solver_name=None,
         solver_options=None,
         time_limit_sec=None,
         verbose=False,
@@ -245,6 +246,7 @@ class ConvexSolver:
             verbose=verbose,
             solver_options=solver_options,
             time_limit_sec=time_limit_sec,
+            preferred_solver=solver_name,
         )
         return decision.value
 
@@ -289,6 +291,7 @@ class ConvexSolver:
         penalty_coef=None,
         proximal_coef=None,
         x_outer=None,
+        solver_name=None,
         solver_options=None,
         time_limit_sec=None,
         verbose=False,
@@ -306,6 +309,7 @@ class ConvexSolver:
                 penalty_coef=penalty_coef,
                 proximal_coef=proximal_coef,
                 x_outer=x_outer,
+                solver_name=solver_name,
                 solver_options=solver_options,
                 time_limit_sec=time_limit_sec,
                 verbose=verbose,

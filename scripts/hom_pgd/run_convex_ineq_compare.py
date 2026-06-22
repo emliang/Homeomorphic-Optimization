@@ -62,7 +62,6 @@ run, main, OUTPUT_DIR = make_benchmark_entrypoint(
     family=EXPERIMENT_FAMILY,
     instances=INSTANCE_OVERRIDES,
     label_builder=convex_problem_scale_label,
-    fallback_params=PARAMS,
 )
 
 

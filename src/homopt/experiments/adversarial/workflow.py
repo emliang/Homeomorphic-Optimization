@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from .data import get_model_checkpoint
 from .evaluation import evaluate_adversarial_attacks
-from .training import train_adversarial_model
-from .visualization import visualize_adversarial_attacks
+from homopt.learning.training.adversarial import train_adversarial_model
+from homopt.viz.adversarial import visualize_adversarial_attacks
 
 
 def adversarial_attack_workflow(

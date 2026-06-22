@@ -7,24 +7,12 @@ import numpy as np
 from pathlib import Path
 from time import perf_counter
 
-from homopt.experiments.common.artifacts import (
+from homopt.records.artifacts import (
     artifact_ref,
     build_benchmark_payload,
     build_visualize_only_benchmark_payload,
-    load_incremental_comparison_artifacts,
+    load_visualize_only_comparison_artifacts,
     save_incremental_comparison_artifacts,
-)
-from homopt.experiments.common.benchmark import (
-    build_convex_problem,
-    build_convex_problem_config,
-    convex_solution_diagnostics,
-    constraint_violation_summary,
-    ensure_record_violation_split,
-    make_single_instance_solver_row,
-    normalize_convex_problem_type,
-    prepare_convex_reference_context,
-    summarize_single_problem_run_record,
-    summarize_run_record,
 )
 from homopt.experiments.common.comparison import build_comparison_views, summarize_comparison_rows_by_method
 from homopt.experiments.common.config import (
@@ -37,7 +25,7 @@ from homopt.experiments.common.config import (
     normalize_single_problem_config,
     reject_algorithm_iteration_budget_keys,
 )
-from homopt.experiments.common.method_specs import (
+from homopt.experiments.method_specs import (
     EQ_CVXPY_BASELINE_SPECS,
     base_common_params,
     build_convex_penalty_method_kwargs,
@@ -47,6 +35,19 @@ from homopt.experiments.common.method_specs import (
     build_penalty_method_params,
 )
 from homopt.experiments.common.naming import labeled_artifact_prefix
+from homopt.solvers.references import (
+    build_convex_problem,
+    build_convex_problem_config,
+    normalize_convex_problem_type,
+    prepare_convex_reference_context,
+)
+from homopt.experiments.common.reports import (
+    convex_solution_diagnostics,
+    constraint_violation_summary,
+    make_single_instance_solver_row,
+    summarize_single_problem_run_record,
+)
+from homopt.experiments.common.run_records import ensure_record_violation_split, summarize_run_record
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.experiments.common.single_problem import _ineq_algorithm_params
 from homopt.optim import run_algorithm
@@ -448,29 +449,23 @@ def convex_algorithm_comparison(
     )
 
     if bool(visualize_only):
-        records, summaries, previous_result, manifest = load_incremental_comparison_artifacts(
+        visual_state = load_visualize_only_comparison_artifacts(
             output_dir,
             algorithms=requested_algorithm_filter,
+            plot_algorithm_order=plot_algorithm_order,
         )
-        previous_metrics = dict(previous_result.get("metrics", {}) or {})
-        previous_artifacts = dict(previous_result.get("artifacts", {}) or {})
-        previous_algorithms = list(records.keys()) or list(manifest.get("algorithms") or algorithms)
-        if plot_algorithm_order is None:
-            visualize_algorithms = previous_algorithms
-        else:
-            visualize_algorithms = [
-                algorithm for algorithm in plot_algorithm_order if algorithm in previous_algorithms
-            ]
-            visualize_algorithms.extend(
-                algorithm for algorithm in previous_algorithms if algorithm not in visualize_algorithms
-            )
-        artifacts = dict(previous_artifacts)
+        records = visual_state["records"]
+        summaries = visual_state["summaries"]
+        previous_result = visual_state["previous_result"]
+        previous_metrics = visual_state["metrics"]
+        previous_algorithms = visual_state["stored_algorithms"]
+        artifacts = visual_state["artifacts"]
         if effective_visualize and output_dir is not None:
             artifacts.update(
                 save_comparison_visualizations(
                     problem=problem,
                     records=records,
-                    algorithms=visualize_algorithms,
+                    algorithms=visual_state["plot_algorithms"],
                     output_dir=output_dir,
                     prefix=effective_visualization_prefix,
                     reference_objective=previous_metrics.get("reference_objective"),

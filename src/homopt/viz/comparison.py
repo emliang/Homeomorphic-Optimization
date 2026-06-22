@@ -9,7 +9,8 @@ import numpy as np
 import torch
 
 from .artifacts import relative_artifacts, save_figure
-from .primitives import plot_metric_convergence
+from .convergence import save_metric_convergence_bundle
+from .evaluation import problem_tensor_kwargs
 from .style import (
     ALGORITHM_COLORS,
     PAPER_STYLE,
@@ -20,19 +21,11 @@ from .style import (
 from .traces import as_numpy, problem_has_equalities
 
 
-def _problem_tensor_kwargs(problem):
-    for attr_name in ("Q", "p", "L", "A_obj"):
-        tensor = getattr(problem, attr_name, None)
-        if torch.is_tensor(tensor):
-            return {"device": tensor.device, "dtype": tensor.dtype}
-    return {"device": getattr(problem, "device", torch.device("cpu")), "dtype": torch.float32}
-
-
 def _split_problem_metrics(problem, x_values):
     x_array = np.asarray(x_values)
     if x_array.size == 0:
         return None
-    x = torch.as_tensor(x_array.reshape(-1, x_array.shape[-1]), **_problem_tensor_kwargs(problem))
+    x = torch.as_tensor(x_array.reshape(-1, x_array.shape[-1]), **problem_tensor_kwargs(problem))
     with torch.no_grad():
         objective = problem.objective_x(x).reshape(-1).detach().cpu().numpy()
         residual = problem.constraint_x(x, clip=False, eq_cons=True)
@@ -285,53 +278,21 @@ def save_comparison_visualizations(
         "runtime_summary": artifact_dir / f"{prefix}_runtime_summary.pdf",
         "metric_traces": artifact_dir / f"{prefix}_metric_traces.json",
     }
-    objective_paths = plot_metric_convergence(
-        traces,
-        "objective",
-        "Objective value",
-        artifact_dir / f"{prefix}_objective_convergence.pdf",
-        reference_value=reference_objective,
-        reference_label=reference_label,
-        method_labels=method_labels,
-        show_legend=show_convergence_legend,
-    )
-    paths.update({f"objective_convergence_{name}": metric_path for name, metric_path in objective_paths.items()})
     if include_equality_convergence is None:
         include_equality_convergence = problem_has_equalities(problem)
-    if include_equality_convergence:
-        equality_paths = plot_metric_convergence(
+    paths.update(
+        save_metric_convergence_bundle(
             traces,
-            "equality_violation",
-            "Equality violation",
-            artifact_dir / f"{prefix}_equality_violation_convergence.pdf",
-            log_y=True,
+            artifact_dir,
+            prefix,
+            reference_objective=reference_objective,
+            reference_label=reference_label,
             method_labels=method_labels,
-            y_min_clip=violation_y_min,
+            violation_y_min=violation_y_min,
             show_legend=show_convergence_legend,
+            include_equality=include_equality_convergence,
         )
-        paths.update({f"equality_violation_convergence_{name}": metric_path for name, metric_path in equality_paths.items()})
-    inequality_paths = plot_metric_convergence(
-        traces,
-        "inequality_violation",
-        "Inequality violation",
-        artifact_dir / f"{prefix}_inequality_violation_convergence.pdf",
-        log_y=True,
-        method_labels=method_labels,
-        y_min_clip=violation_y_min,
-        show_legend=show_convergence_legend,
     )
-    paths.update({f"inequality_violation_convergence_{name}": metric_path for name, metric_path in inequality_paths.items()})
-    full_paths = plot_metric_convergence(
-        traces,
-        "full_violation",
-        "Full violation",
-        artifact_dir / f"{prefix}_full_violation_convergence.pdf",
-        log_y=True,
-        method_labels=method_labels,
-        y_min_clip=violation_y_min,
-        show_legend=show_convergence_legend,
-    )
-    paths.update({f"full_violation_convergence_{name}": metric_path for name, metric_path in full_paths.items()})
     plot_runtime_summary(
         records,
         algorithms,

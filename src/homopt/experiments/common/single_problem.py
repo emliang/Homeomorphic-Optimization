@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .config import merged
-from .method_specs import (
+from .methods import (
     base_common_params,
     build_convex_penalty_method_kwargs,
     build_first_order_method_params,

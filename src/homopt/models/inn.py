@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from homopt.models.condition import MLP, Mixer, PINN, QuadMixer, ResBlock, build_condition_encoder, normalize_condition_encoder_type
 from homopt.models.flows.coupling import CombinedActNormLU, CouplingLayer, MADE, MaskedLinear
 from homopt.models.flows.iresblock import iResidualLayer
 from homopt.models.flows.lipschitz import SpectralNormLinear
@@ -33,7 +34,7 @@ class INN(nn.Module):
     ):
         super().__init__()
         del outact  # accepted by the public constructor, not used by current layers
-        self.con_type = Con_type
+        self.con_type = normalize_condition_encoder_type(Con_type)
         self.cond_embed_mode = str(cond_embed_mode).strip().lower()
         if self.cond_embed_mode not in {'shared', 'per_layer', 'per_layer_independent'}:
             raise ValueError(
@@ -45,13 +46,14 @@ class INN(nn.Module):
         flows = []
 
         def _build_cond_embed(out_dim):
-            if Con_type == 'PI':
-                return PINN(cin, nhid, out_dim, num_layer=2)
-            if Con_type == 'Mix':
-                return QuadMixer(nin, cin, nhid, out_dim, num_layer=2)
-            if Con_type == 'MLP':
-                return MLP(cin, nhid, out_dim, num_layer=2)
-            return None
+            return build_condition_encoder(
+                self.con_type,
+                n_var=nin,
+                input_dim=cin,
+                hidden_dim=nhid,
+                output_dim=out_dim,
+                num_layer=2,
+            )
 
         self.con_emb = None
         self.con_emb_layers = None
@@ -87,7 +89,7 @@ class INN(nn.Module):
     def _prepare_condition_input(self, c, batch_size):
         if self.con_emb is None and self.con_emb_layers is None:
             return c.reshape(batch_size, -1)
-        if self.con_type == 'MLP':
+        if self.con_type == 'mlp':
             return c.reshape(batch_size, -1)
         return c
 
@@ -163,82 +165,6 @@ class INN(nn.Module):
     def inverse(self, z, c):
         c_emb = self.embed_condition(c, z.shape[0])
         return self.inverse_embedded(z, c_emb)
-
-
-class ResBlock(nn.Module):
-    def __init__(self, n_in, n_hid):
-        super().__init__()
-        self.net = nn.Sequential(nn.Linear(n_in, n_hid // 2), nn.ReLU(), nn.Linear(n_hid // 2, n_in))
-
-    def forward(self, x):
-        return x + self.net(x)
-
-
-class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dims, output_dim, num_layer=1, activation=nn.ReLU):
-        super().__init__()
-        hid_dim = hidden_dims
-        layers = [nn.Linear(input_dim, hid_dim), activation()]
-        for _ in range(num_layer):
-            layers.append(nn.LayerNorm(hid_dim))
-            # layers += [nn.Linear(hid_dim, hid_dim), activation()]
-            layers.append(ResBlock(hid_dim, hid_dim))
-        layers.append(nn.LayerNorm(hid_dim))
-        layers.append(nn.Linear(hid_dim, output_dim))
-        self.mlp = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.mlp(x)
-
-
-class PINN(nn.Module):
-    """Permutation Invariant Neural Network."""
-
-    def __init__(self, input_dim, hidden_dims, output_dim, num_layer=1, activation=nn.ReLU):
-        super().__init__()
-        self.input_dim = input_dim
-        hid_dim = hidden_dims
-        self.phi = MLP(input_dim, hid_dim, hid_dim, num_layer=num_layer, activation=activation)
-        self.rho = MLP(hid_dim, hid_dim, output_dim, num_layer=num_layer, activation=activation)
-
-    def forward(self, x):
-        batch_size = x.shape[0]
-        x = x.view(batch_size, -1, self.input_dim)
-        return self.rho(self.phi(x).max(1)[0])
-
-
-class Mixer(nn.Module):
-    def __init__(self, input_dim, hidden_dims, output_dim, num_layer=1, activation=nn.ReLU):
-        super().__init__()
-        hid_dim = hidden_dims
-        self.row_mlp = MLP(input_dim, hid_dim, hid_dim, num_layer=num_layer, activation=activation)
-        self.col_mlp = MLP(input_dim, hid_dim, hid_dim, num_layer=num_layer, activation=activation)
-
-    def forward(self, x):
-        row_emb = self.row_mlp(x)
-        col_emb = self.col_mlp(row_emb.permute(0, 1, 3, 2))
-        return col_emb.mean(2)
-
-
-class QuadMixer(nn.Module):
-    def __init__(self, n_var, input_dim, hidden_dims, output_dim, num_layer=1, activation=nn.ReLU):
-        super().__init__()
-        self.input_dim = input_dim
-        hid_dim = hidden_dims
-        self.n_var = n_var
-        self.mixer = Mixer(n_var, hid_dim, hid_dim, num_layer=1, activation=activation)
-        self.emb = MLP(n_var + 1, hid_dim, hid_dim, num_layer=1, activation=activation)
-        self.phi = MLP(hid_dim, hid_dim, hid_dim, num_layer=num_layer, activation=activation)
-        self.rho = MLP(hid_dim, hid_dim, output_dim, num_layer=num_layer, activation=activation)
-
-    def forward(self, x):
-        batch_size = x.shape[0]
-        quad_input = x[:, :, : self.n_var ** 2]
-        lin_input = x[:, :, self.n_var ** 2 :]
-        quad_emb = self.mixer(quad_input.view(batch_size, -1, self.n_var, self.n_var))
-        lin_emb = self.emb(lin_input)
-        emb = self.phi(lin_emb + quad_emb).max(1)[0]
-        return self.rho(emb)
 
 
 class EMA:

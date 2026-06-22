@@ -1,17 +1,8 @@
 """Model namespace."""
 
-from .inn import (
-    EMA,
-    INN,
-    MLP,
-    Mixer,
-    PINN,
-    QuadMixer,
-    ResBlock,
-    initialize_inn_as_identity,
-    load_inn_mapping,
-    save_inn_mapping,
-)
+from .adversarial import AdaptiveCNN, ModelTrainer, ResidualBlock, build_model
+from .condition import MLP, Mixer, PINN, QuadMixer, ResBlock, build_condition_encoder, normalize_condition_encoder_type
+from .inn import EMA, INN, initialize_inn_as_identity, load_inn_mapping, save_inn_mapping
 from .local_stretch import combine_local_stretch_objective, local_log_stretch_loss
 from .cvxinn import (
     CubeGaugeCvxINN,
@@ -38,6 +29,7 @@ from .nn import (
 )
 
 __all__ = [
+    'AdaptiveCNN',
     'CubeGaugeCvxINN',
     'CvxINN',
     'DecisionPredictorNet',
@@ -45,14 +37,18 @@ __all__ = [
     'INN',
     'IPNN',
     'MLP',
+    'ModelTrainer',
     'Mixer',
     'NoiseModule',
     'PINN',
     'QuadMixer',
+    'ResidualBlock',
     'ResBlock',
     'SphereReparam',
     'SphereReparamGaugeCvxINN',
     'TanhGaugeCvxINN',
+    'build_condition_encoder',
+    'build_model',
     'combine_local_stretch_objective',
     'cube_compactify',
     'cube_decompactify',
@@ -61,6 +57,7 @@ __all__ = [
     'load_inn_mapping',
     'load_ipnn_mapping',
     'local_log_stretch_loss',
+    'normalize_condition_encoder_type',
     'radial_compactify',
     'radial_decompactify',
     'save_decision_predictor',

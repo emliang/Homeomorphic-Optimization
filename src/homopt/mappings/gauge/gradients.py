@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from .constants import FAMILY_BOX_LOWER, FAMILY_BOX_UPPER, FAMILY_LINEAR, FAMILY_QUAD, FAMILY_SOC
+from .constants import FAMILY_BOX_LOWER, FAMILY_BOX_UPPER, FAMILY_GENERAL, FAMILY_LINEAR, FAMILY_QUAD, FAMILY_SOC
 from .math import _safe_denominator
 
 
@@ -45,6 +45,7 @@ def best_beta_gradient_u(
     pq,
     quad_gradB_const,
     quad_Ccoef,
+    general_grad_u=None,
 ):
     if gradient_rule == "implicit":
         return implicit_best_beta_gradient_u(
@@ -63,6 +64,7 @@ def best_beta_gradient_u(
             Qsym=Qsym,
             pq=pq,
             quad_gradB_const=quad_gradB_const,
+            general_grad_u=general_grad_u,
         )
     if gradient_rule == "hybrid":
         return hybrid_best_beta_gradient_u(
@@ -82,6 +84,7 @@ def best_beta_gradient_u(
             C=C,
             Gx0=Gx0,
             quad_gradB_const=quad_gradB_const,
+            general_grad_u=general_grad_u,
         )
     if gradient_rule == "polynomial":
         return polynomial_best_beta_gradient_u(
@@ -101,8 +104,10 @@ def best_beta_gradient_u(
             C=C,
             soc_gradB_const=soc_gradB_const,
             soc_Ccoef=soc_Ccoef,
+            Qsym=Qsym,
             quad_gradB_const=quad_gradB_const,
             quad_Ccoef=quad_Ccoef,
+            general_grad_u=general_grad_u,
         )
     raise ValueError(f"Unsupported explicit gauge gradient_rule: {gradient_rule}")
 
@@ -124,6 +129,7 @@ def implicit_best_beta_gradient_u(
     Qsym,
     pq,
     quad_gradB_const,
+    general_grad_u=None,
 ):
     batch_size, nvar = u.shape
     device, dtype = u.device, u.dtype
@@ -184,6 +190,14 @@ def implicit_best_beta_gradient_u(
             x_boundary = center + rho_quad * u[quad_mask]
             grad_x[quad_mask] = torch.einsum("bij,bj->bi", Qsym[quad_idx], x_boundary) + pq[quad_idx]
 
+    if general_grad_u is not None:
+        general_mask = best_family == FAMILY_GENERAL
+        general_batch = batch_index[general_mask]
+        general_idx = best_index[general_mask]
+        grad = torch.zeros_like(u)
+        grad[general_mask] = general_grad_u[general_batch, general_idx]
+        return torch.where(general_mask.view(-1, 1), grad, beta * grad_x / _safe_denominator((grad_x * u).sum(dim=1, keepdim=True), eps=eps))
+
     radial_dot = (grad_x * u).sum(dim=1, keepdim=True)
     return beta * grad_x / _safe_denominator(radial_dot, eps=eps)
 
@@ -206,8 +220,10 @@ def polynomial_best_beta_gradient_u(
     C,
     soc_gradB_const,
     soc_Ccoef,
+    Qsym,
     quad_gradB_const,
     quad_Ccoef,
+    general_grad_u=None,
 ):
     del beta
     batch_size = best_family.shape[0]
@@ -282,6 +298,12 @@ def polynomial_best_beta_gradient_u(
             eps=eps,
         )
 
+    if general_grad_u is not None:
+        general_mask = best_family == FAMILY_GENERAL
+        general_batch = batch_index[general_mask]
+        general_idx = best_index[general_mask]
+        best_grad_u[general_mask] = general_grad_u[general_batch, general_idx]
+
     return best_grad_u
 
 
@@ -304,8 +326,10 @@ def smooth_polynomial_beta_gradient_u(
     C,
     soc_gradB_const,
     soc_Ccoef,
+    Qsym,
     quad_gradB_const,
     quad_Ccoef,
+    general_grad_u=None,
 ):
     batch_size, candidate_count = candidate_family.shape
     device = candidate_family.device
@@ -330,33 +354,39 @@ def smooth_polynomial_beta_gradient_u(
     grad = torch.zeros(batch_size * candidate_count, nvar, device=device, dtype=dtype)
 
     if A is not None:
-        linear_mask = flat_family == FAMILY_LINEAR
+        linear_mask = (flat_family == FAMILY_LINEAR) & flat_active
         linear_idx = flat_index[linear_mask]
         grad[linear_mask] = A[linear_idx] * inv_slack.view(-1)[linear_idx].unsqueeze(-1)
 
     if inv_lower_denom is not None:
         row_index = torch.arange(batch_size * candidate_count, device=device)
-        lower_mask = flat_family == FAMILY_BOX_LOWER
+        lower_mask = (flat_family == FAMILY_BOX_LOWER) & flat_active
         lower_idx = flat_index[lower_mask]
         grad[row_index[lower_mask], lower_idx] = inv_lower_denom.view(-1)[lower_idx]
 
-        upper_mask = flat_family == FAMILY_BOX_UPPER
+        upper_mask = (flat_family == FAMILY_BOX_UPPER) & flat_active
         upper_idx = flat_index[upper_mask]
         grad[row_index[upper_mask], upper_idx] = inv_upper_denom.view(-1)[upper_idx]
 
     if G is not None:
-        soc_mask = flat_family == FAMILY_SOC
+        soc_mask = (flat_family == FAMILY_SOC) & flat_active
         soc_idx = flat_index[soc_mask]
         alpha_soc_sel = flat_beta[soc_mask]
         if batch_size == 1:
-            B_soc_sel = candidate_cache["B_soc"][0, soc_idx].unsqueeze(-1)
-            Gu_sel = candidate_cache["Gu"][0, soc_idx]
-            Cu_sel = candidate_cache["Cu"][0, soc_idx].unsqueeze(-1)
+            soc_batch = torch.zeros_like(soc_idx)
         else:
             soc_batch = _flat_batch(soc_mask)
+        if "B_soc" in candidate_cache:
             B_soc_sel = candidate_cache["B_soc"][soc_batch, soc_idx].unsqueeze(-1)
             Gu_sel = candidate_cache["Gu"][soc_batch, soc_idx]
             Cu_sel = candidate_cache["Cu"][soc_batch, soc_idx].unsqueeze(-1)
+        else:
+            u_sel = u[soc_batch]
+            G_sel = G[soc_idx]
+            C_sel = C[soc_idx]
+            Gu_sel = torch.einsum("bn,bkn->bk", u_sel, G_sel)
+            Cu_sel = torch.sum(u_sel * C_sel, dim=-1, keepdim=True)
+            B_soc_sel = torch.sum(u_sel * soc_gradB_const[soc_idx], dim=-1, keepdim=True)
         C_soc_sel = soc_Ccoef.view(-1)[soc_idx].unsqueeze(-1)
         G_sel = G[soc_idx]
         C_sel = C[soc_idx]
@@ -369,16 +399,20 @@ def smooth_polynomial_beta_gradient_u(
         )
 
     if quad_gradB_const is not None:
-        quad_mask = flat_family == FAMILY_QUAD
+        quad_mask = (flat_family == FAMILY_QUAD) & flat_active
         quad_idx = flat_index[quad_mask]
         alpha_quad_sel = flat_beta[quad_mask]
         if batch_size == 1:
-            B_quad_sel = candidate_cache["B_quad"][0, quad_idx].unsqueeze(-1)
-            gradA_quad_sel = candidate_cache["Qu"][0, quad_idx]
+            quad_batch = torch.zeros_like(quad_idx)
         else:
             quad_batch = _flat_batch(quad_mask)
+        if "B_quad" in candidate_cache:
             B_quad_sel = candidate_cache["B_quad"][quad_batch, quad_idx].unsqueeze(-1)
             gradA_quad_sel = candidate_cache["Qu"][quad_batch, quad_idx]
+        else:
+            u_sel = u[quad_batch]
+            B_quad_sel = torch.sum(u_sel * quad_gradB_const[quad_idx], dim=-1, keepdim=True)
+            gradA_quad_sel = torch.einsum("bij,bj->bi", Qsym[quad_idx], u_sel)
         C_quad_sel = quad_Ccoef.view(-1)[quad_idx].unsqueeze(-1)
         gradB_quad_sel = quad_gradB_const[quad_idx]
         denom_quad_sel = 2 * C_quad_sel * alpha_quad_sel + B_quad_sel
@@ -386,6 +420,12 @@ def smooth_polynomial_beta_gradient_u(
             denom_quad_sel,
             eps=eps,
         )
+
+    if general_grad_u is not None:
+        general_mask = (flat_family == FAMILY_GENERAL) & flat_active
+        general_idx = flat_index[general_mask]
+        general_batch = torch.zeros_like(general_idx) if batch_size == 1 else _flat_batch(general_mask)
+        grad[general_mask] = general_grad_u[general_batch, general_idx]
 
     weighted = flat_weight * torch.where(flat_active.view(-1, 1), grad, torch.zeros_like(grad))
     return weighted.view(batch_size, candidate_count, nvar).sum(dim=1)
@@ -409,6 +449,7 @@ def hybrid_best_beta_gradient_u(
     C,
     Gx0,
     quad_gradB_const,
+    general_grad_u=None,
 ):
     batch_size = best_family.shape[0]
     device = best_family.device
@@ -456,5 +497,10 @@ def hybrid_best_beta_gradient_u(
         radial_dot = (grad_x * u[quad_mask]).sum(dim=1, keepdim=True)
         best_grad_u[quad_mask] = beta[quad_mask] * grad_x / _safe_denominator(radial_dot, eps=eps)
 
-    return best_grad_u
+    if general_grad_u is not None:
+        general_mask = best_family == FAMILY_GENERAL
+        general_batch = batch_index[general_mask]
+        general_idx = best_index[general_mask]
+        best_grad_u[general_mask] = general_grad_u[general_batch, general_idx]
 
+    return best_grad_u

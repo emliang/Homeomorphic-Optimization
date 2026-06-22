@@ -44,8 +44,8 @@ def save_result(result: ExperimentResult, output_dir, config=None):
     result_path.write_text(json.dumps(result_payload, indent=2, sort_keys=True))
 
     if config is not None:
-        config_path = output_path / 'config.json'
-        config_path.write_text(json.dumps(_json_safe(config), indent=2, sort_keys=True))
+        config_file = output_path / 'config.json'
+        config_file.write_text(json.dumps(_json_safe(config), indent=2, sort_keys=True))
 
     return result_path
 

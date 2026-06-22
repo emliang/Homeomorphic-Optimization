@@ -87,7 +87,7 @@ def normalize_exact_solver_call_kwargs(exact_solver, *, solve_config=None, **kwa
     ):
         normalized["solver"] = normalized.pop("solver_name")
     elif "solver_name" in normalized and not _solver_accepts_keyword(target, "solver_name"):
-        normalized.pop("solver_name", None)
+        raise TypeError(f"{type(exact_solver).__name__} does not accept explicit solver_name.")
     if (
         "options" not in normalized
         and "solver_options" in normalized
@@ -96,7 +96,7 @@ def normalize_exact_solver_call_kwargs(exact_solver, *, solve_config=None, **kwa
     ):
         normalized["options"] = normalized.pop("solver_options")
     elif "solver_options" in normalized and not _solver_accepts_keyword(target, "solver_options"):
-        normalized.pop("solver_options", None)
+        raise TypeError(f"{type(exact_solver).__name__} does not accept explicit solver_options.")
     return _filter_solver_kwargs(target, normalized)
 
 

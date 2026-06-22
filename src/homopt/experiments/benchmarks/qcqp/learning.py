@@ -7,25 +7,23 @@ from time import perf_counter
 
 import torch
 
-from homopt.experiments.common.artifacts import artifact_mapping, artifact_root, build_benchmark_payload, save_json
-from homopt.experiments.common.parametric import normalize_qcqp_inn_benchmark_config, normalize_qcqp_problem_config, normalize_qcqp_train_config
+from homopt.records.artifacts import artifact_mapping, artifact_root, build_benchmark_payload, save_json
 from homopt.experiments.common.config import normalize_solver_run_config, require_explicit_config
-from homopt.experiments.common.inn_training import (
-    build_qcqp_ipnn_training_payload,
-    build_qcqp_inn_training_payload,
-    load_or_train_ipnn_mapping,
-    load_or_train_inn_mapping,
-    training_time_from_record,
-)
-from homopt.experiments.common.learning_training import build_predictor_training_payload, load_or_train_decision_predictor
-from homopt.experiments.common.parametric_reports import save_parametric_learning_artifacts
+from homopt.learning.training import prepare_decision_predictor, prepare_learning_mapping
+from homopt.learning.training.cache import training_time_from_record
+from homopt.experiments.common.learning_reports import save_parametric_learning_artifacts
 from homopt.experiments.common.parametric_runtime import run_prediction_refinement_route
-from .problem import (
+from .reports import (
     QCQP_LEARNING_BASELINES,
     build_qcqp_learning_baseline_output,
     build_qcqp_learning_benchmark_metrics,
-    build_qcqp_learning_context,
     normalize_qcqp_learning_baselines,
+)
+from .setup import (
+    build_qcqp_learning_context,
+    normalize_qcqp_inn_benchmark_config,
+    normalize_qcqp_problem_config,
+    normalize_qcqp_train_config,
 )
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.learning import (
@@ -41,7 +39,8 @@ from homopt.learning import (
 )
 from homopt.problems import bind_problem_instance
 from homopt.solvers import QCQPSolver, solve_exact_result
-from homopt.utils import ensure_dir, set_global_seed
+from homopt.experiments.common.io import ensure_dir
+from homopt.utils import set_global_seed
 
 
 def _make_qcqp_learning_refiner(
@@ -146,18 +145,22 @@ def _prepare_qcqp_postprocess_resources(
             model_config=require_explicit_config(model_config, "model_config"),
             train_config=require_explicit_config(train_config, "train_config"),
         )
-        homeo_args = build_qcqp_inn_training_payload(
-            homeo_cfg["problem"],
-            homeo_cfg["model"],
-            homeo_cfg["train"],
+        homeo_resource = prepare_learning_mapping(
+            "inn",
+            context["qc_problem"],
+            problem_args=homeo_cfg["problem"],
+            model_args=homeo_cfg["model"],
+            train_args=homeo_cfg["train"],
+            save_dir=save_dir / "homeomorphic_projection",
+            retrain=retrain,
+            runtime_device=runtime_device,
+            runtime_dtype=runtime_dtype,
             ensure_results_save_freq=True,
         )
-        model, record, model_path, record_path = load_or_train_inn_mapping(
-            context["qc_problem"],
-            homeo_args,
-            save_dir / "homeomorphic_projection",
-            retrain=retrain,
-        )
+        model = homeo_resource["model"]
+        record = homeo_resource["training_record"]
+        model_path = homeo_resource["model_path"]
+        record_path = homeo_resource["record_path"]
         resources["homeomorphic_model"] = model
         resources["homeomorphic_train_time"] = training_time_from_record(record)
         artifacts.update(
@@ -175,22 +178,22 @@ def _prepare_qcqp_postprocess_resources(
             total_iteration=1000,
             train_config=ipnn_train_config,
         )
-        ipnn_args = build_qcqp_ipnn_training_payload(
-            problem_args,
-            {
-                **require_explicit_config(ipnn_model_config, "ipnn_model_config"),
-                "device": str(runtime_device),
-                "dtype": runtime_dtype,
-            },
-            ipnn_train_args,
+        ipnn_resource = prepare_learning_mapping(
+            "ipnn",
+            context["qc_problem"],
+            problem_args=problem_args,
+            model_args=require_explicit_config(ipnn_model_config, "ipnn_model_config"),
+            train_args=ipnn_train_args,
+            save_dir=save_dir / "ipnn_projection",
+            retrain=retrain,
+            runtime_device=runtime_device,
+            runtime_dtype=runtime_dtype,
             ensure_results_save_freq=True,
         )
-        model, record, model_path, record_path = load_or_train_ipnn_mapping(
-            context["qc_problem"],
-            ipnn_args,
-            save_dir / "ipnn_projection",
-            retrain=retrain,
-        )
+        model = ipnn_resource["model"]
+        record = ipnn_resource["training_record"]
+        model_path = ipnn_resource["model_path"]
+        record_path = ipnn_resource["record_path"]
         resources["ipnn_model"] = model
         resources["ipnn_train_time"] = training_time_from_record(record)
         artifacts.update(
@@ -239,23 +242,24 @@ def _prepare_qcqp_predictor_resource(
         total_iteration=1000,
         train_config=predictor_train_config,
     )
-    predictor_args = build_predictor_training_payload(
-        problem_args,
-        {
+    predictor_resource = prepare_decision_predictor(
+        context["qc_problem"],
+        problem_args=problem_args,
+        model_args={
             **require_explicit_config(predictor_model_config, "predictor_model_config"),
             "seed": seed,
-            "device": str(runtime_device),
-            "dtype": runtime_dtype,
         },
-        predictor_train_args,
+        train_args=predictor_train_args,
+        save_dir=save_dir / "decision_predictor",
+        retrain=retrain,
+        runtime_device=runtime_device,
+        runtime_dtype=runtime_dtype,
         ensure_results_save_freq=True,
     )
-    model, record, model_path, record_path = load_or_train_decision_predictor(
-        context["qc_problem"],
-        predictor_args,
-        save_dir / "decision_predictor",
-        retrain=retrain,
-    )
+    model = predictor_resource["model"]
+    record = predictor_resource["training_record"]
+    model_path = predictor_resource["model_path"]
+    record_path = predictor_resource["record_path"]
     predictor = NeuralDecisionPredictor(model, context["qc_problem"])
     artifacts = artifact_mapping(
         output_dir,

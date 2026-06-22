@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import torch
 
-from homopt.experiments.benchmarks.qcqp import run_qcqp_learning_route
 from homopt.learning import ConstantPredictor, ProjectionRefiner, summarize_prediction_route
 from homopt.problems import ConvexOpt, ParametricProblemBase, ToyStarOpt, create_test_problem
 from homopt.utils import set_global_seed
@@ -93,40 +92,6 @@ def learning_route_summary(seed=0, n_var=2, n_samples=8, prediction_value=0.0):
     metrics.update({
         "seed": int(seed),
         "n_var": int(n_var),
-        "n_samples": int(n_samples),
-        "prediction_value": float(prediction_value),
-    })
-    return {"objective": objective, "feasible": feasible, "metrics": metrics}
-
-
-def qcqp_learning_route_summary(
-    seed=7,
-    n_var=10,
-    n_qua_cons=10,
-    n_linear_cons=0,
-    n_samples=8,
-    prediction_value=1.5,
-):
-    summary, _ = run_qcqp_learning_route(
-        seed=seed,
-        n_var=n_var,
-        n_qua_cons=n_qua_cons,
-        n_linear_cons=n_linear_cons,
-        n_samples=n_samples,
-        prediction_value=prediction_value,
-    )
-    summary.update({
-        "objective": float(summary["refined_objective_mean"]),
-        "feasible": summary["refined_feasibility_rate"] >= 1.0 - 1e-12,
-    })
-    metrics = dict(summary)
-    objective = metrics.pop("objective")
-    feasible = metrics.pop("feasible")
-    metrics.update({
-        "seed": int(seed),
-        "n_var": int(n_var),
-        "n_qua_cons": int(n_qua_cons),
-        "n_linear_cons": int(n_linear_cons),
         "n_samples": int(n_samples),
         "prediction_value": float(prediction_value),
     })

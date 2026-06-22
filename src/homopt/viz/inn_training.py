@@ -6,7 +6,8 @@ from pathlib import Path
 
 import numpy as np
 from .artifacts import save_figure
-from .primitives import draw_metric_convergence, draw_objective_residual_landscape, draw_trajectory
+from .convergence import draw_metric_convergence
+from .primitives import draw_objective_residual_landscape, draw_trajectory
 from .inn_records import (
     _add_objective_gap_metrics,
     _as_numpy_1d,
@@ -41,9 +42,8 @@ SENSITIVITY_COLORS = [
     "#8C564B",
 ]
 
-QCQP_TRAJECTORY_GRID_SIZE = 520
-QCQP_LATENT_TRAJECTORY_GRID_SIZE = 320
-QCQP_TRAJECTORY_EVAL_BATCH_SIZE = None
+QCQP_TRAJECTORY_GRID_SIZE = 320
+QCQP_LATENT_TRAJECTORY_GRID_SIZE = 220
 
 
 def _artifact_ref(output_dir, path):
@@ -109,6 +109,99 @@ def _sensitivity_styles(labels):
     method_labels = {label: label for label in labels}
     return colors, line_styles, method_labels
 
+
+def _save_inn_convergence_bundle(
+    *,
+    output_dir,
+    traces,
+    artifact_root_path,
+    file_prefix,
+    artifact_prefix,
+    reference_objective=None,
+    reference_label=None,
+    colors=None,
+    line_styles=None,
+    method_labels=None,
+    show_legend=True,
+    violation_y_min=1e-8,
+    plot_objective_gap=True,
+    plot_gap_plus_violation=True,
+    artifact_suffix="",
+):
+    artifacts = {}
+    obj_paths = draw_metric_convergence(
+        traces,
+        "objective",
+        "Objective value",
+        artifact_root_path / f"{file_prefix}_objective.pdf",
+        reference_value=reference_objective,
+        reference_label=reference_label if reference_objective is not None else None,
+        colors=colors,
+        line_styles=line_styles,
+        method_labels=method_labels,
+        show_legend=show_legend,
+    )
+    vio_paths = draw_metric_convergence(
+        traces,
+        "violation",
+        "Inequality violation",
+        artifact_root_path / f"{file_prefix}_violation.pdf",
+        log_y=True,
+        y_min_clip=violation_y_min,
+        colors=colors,
+        line_styles=line_styles,
+        method_labels=method_labels,
+        show_legend=show_legend,
+    )
+    artifacts.update(
+        {f"{artifact_prefix}_objective_{key}{artifact_suffix}": _artifact_ref(output_dir, path) for key, path in obj_paths.items()}
+    )
+    artifacts.update(
+        {f"{artifact_prefix}_violation_{key}{artifact_suffix}": _artifact_ref(output_dir, path) for key, path in vio_paths.items()}
+    )
+
+    gap_traces, _ = _add_objective_gap_metrics(traces, reference_objective=reference_objective)
+    if gap_traces and bool(plot_objective_gap):
+        gap_paths = draw_metric_convergence(
+            gap_traces,
+            "objective_gap",
+            "Relative optimality gap",
+            artifact_root_path / f"{file_prefix}_objective_gap.pdf",
+            log_y=True,
+            y_min_clip=violation_y_min,
+            colors=colors,
+            line_styles=line_styles,
+            method_labels=method_labels,
+            show_legend=show_legend,
+        )
+        artifacts.update(
+            {
+                f"{artifact_prefix}_objective_gap_{key}{artifact_suffix}": _artifact_ref(output_dir, path)
+                for key, path in gap_paths.items()
+            }
+        )
+    if gap_traces and bool(plot_gap_plus_violation):
+        solution_paths = draw_metric_convergence(
+            gap_traces,
+            "objective_gap_plus_violation",
+            "Opt. gap + violation",
+            artifact_root_path / f"{file_prefix}_gap_plus_violation.pdf",
+            log_y=True,
+            y_min_clip=violation_y_min,
+            colors=colors,
+            line_styles=line_styles,
+            method_labels=method_labels,
+            show_legend=show_legend,
+        )
+        artifacts.update(
+            {
+                f"{artifact_prefix}_gap_plus_violation_{key}{artifact_suffix}": _artifact_ref(output_dir, path)
+                for key, path in solution_paths.items()
+            }
+        )
+    return artifacts
+
+
 def save_qcqp_2d_comparison_visualizations(
     output_dir,
     artifact_root_path,
@@ -168,7 +261,6 @@ def save_qcqp_2d_comparison_visualizations(
             combined_traj,
             objective_params=objective_params,
             grid_size=QCQP_TRAJECTORY_GRID_SIZE,
-            eval_batch_size=QCQP_TRAJECTORY_EVAL_BATCH_SIZE,
         )
     for method, traj in trajectories.items():
         if not traj.size:
@@ -202,7 +294,6 @@ def save_qcqp_2d_comparison_visualizations(
             z_traj,
             objective_params=objective_params,
             grid_size=QCQP_LATENT_TRAJECTORY_GRID_SIZE,
-            eval_batch_size=QCQP_TRAJECTORY_EVAL_BATCH_SIZE,
         )
         _draw_latent_landscape_from_data(ax, latent_landscape)
         draw_trajectory(
@@ -227,64 +318,24 @@ def save_qcqp_2d_comparison_visualizations(
         if trace is not None:
             traces[method] = trace
     if traces and bool(plot_convergence):
-        obj_paths = draw_metric_convergence(
-            traces,
-            "objective",
-            "Objective value",
-            artifact_root_path / "qcqp_2d_objective.pdf",
-            reference_value=reference_objective,
-            reference_label="IPOPT" if reference_objective is not None else None,
-            colors=ALGORITHM_COLORS,
-            line_styles=ALGORITHM_LINE_STYLES,
-            method_labels=INN_PGD_METHOD_LABELS,
-            show_legend=show_convergence_legend,
-        )
-        vio_paths = draw_metric_convergence(
-            traces,
-            "violation",
-            "Inequality violation",
-            artifact_root_path / "qcqp_2d_violation.pdf",
-            log_y=True,
-            y_min_clip=violation_y_min,
-            colors=ALGORITHM_COLORS,
-            line_styles=ALGORITHM_LINE_STYLES,
-            method_labels=INN_PGD_METHOD_LABELS,
-            show_legend=show_convergence_legend,
-        )
-        artifacts.update({f"qcqp_2d_objective_{key}": _artifact_ref(output_dir, path) for key, path in obj_paths.items()})
-        artifacts.update({f"qcqp_2d_violation_{key}": _artifact_ref(output_dir, path) for key, path in vio_paths.items()})
-        gap_traces, _ = _add_objective_gap_metrics(traces, reference_objective=reference_objective)
-        if gap_traces and bool(plot_objective_gap):
-            gap_paths = draw_metric_convergence(
-                gap_traces,
-                "objective_gap",
-                "Relative optimality gap",
-                artifact_root_path / "qcqp_2d_objective_gap.pdf",
-                log_y=True,
-                y_min_clip=violation_y_min,
-                reference_label=None,
+        artifacts.update(
+            _save_inn_convergence_bundle(
+                output_dir=output_dir,
+                traces=traces,
+                artifact_root_path=artifact_root_path,
+                file_prefix="qcqp_2d",
+                artifact_prefix="qcqp_2d",
+                reference_objective=reference_objective,
+                reference_label="IPOPT",
                 colors=ALGORITHM_COLORS,
                 line_styles=ALGORITHM_LINE_STYLES,
                 method_labels=INN_PGD_METHOD_LABELS,
                 show_legend=show_convergence_legend,
+                violation_y_min=violation_y_min,
+                plot_objective_gap=plot_objective_gap,
+                plot_gap_plus_violation=plot_gap_plus_violation,
             )
-            artifacts.update({f"qcqp_2d_objective_gap_{key}": _artifact_ref(output_dir, path) for key, path in gap_paths.items()})
-        if gap_traces and bool(plot_gap_plus_violation):
-            solution_paths = draw_metric_convergence(
-                gap_traces,
-                "objective_gap_plus_violation",
-                "Opt. gap + violation",
-                artifact_root_path / "qcqp_2d_gap_plus_violation.pdf",
-                log_y=True,
-                y_min_clip=violation_y_min,
-                colors=ALGORITHM_COLORS,
-                line_styles=ALGORITHM_LINE_STYLES,
-                method_labels=INN_PGD_METHOD_LABELS,
-                show_legend=show_convergence_legend,
-            )
-            artifacts.update(
-                {f"qcqp_2d_gap_plus_violation_{key}": _artifact_ref(output_dir, path) for key, path in solution_paths.items()}
-            )
+        )
         if bool(plot_runtime_summary):
             runtime_path = _plot_outer_per_iter_runtime(
                 method_records,
@@ -354,75 +405,24 @@ def save_qcqp_sensitivity_convergence_visualizations(
         if not traces:
             continue
 
-        obj_paths = draw_metric_convergence(
-            traces,
-            "objective",
-            "Objective value",
-            instance_root / f"qcqp_sensitivity_{sweep_name}_objective.pdf",
-            colors=colors,
-            line_styles=line_styles,
-            method_labels=method_labels,
-            show_legend=show_convergence_legend,
-        )
-        vio_paths = draw_metric_convergence(
-            traces,
-            "violation",
-            "Inequality violation",
-            instance_root / f"qcqp_sensitivity_{sweep_name}_violation.pdf",
-            log_y=True,
-            y_min_clip=violation_y_min,
-            colors=colors,
-            line_styles=line_styles,
-            method_labels=method_labels,
-            show_legend=show_convergence_legend,
-        )
         suffix = f"_inst{instance_idx}" if len(indices) > 1 else ""
         artifacts.update(
-            {f"qcqp_sensitivity_{sweep_name}_objective_{key}{suffix}": _artifact_ref(output_dir, path) for key, path in obj_paths.items()}
-        )
-        artifacts.update(
-            {f"qcqp_sensitivity_{sweep_name}_violation_{key}{suffix}": _artifact_ref(output_dir, path) for key, path in vio_paths.items()}
-        )
-
-        gap_traces, _ = _add_objective_gap_metrics(traces, reference_objective=None)
-        if gap_traces and bool(plot_objective_gap):
-            gap_paths = draw_metric_convergence(
-                gap_traces,
-                "objective_gap",
-                "Relative optimality gap",
-                instance_root / f"qcqp_sensitivity_{sweep_name}_objective_gap.pdf",
-                log_y=True,
-                y_min_clip=violation_y_min,
+            _save_inn_convergence_bundle(
+                output_dir=output_dir,
+                traces=traces,
+                artifact_root_path=instance_root,
+                file_prefix=f"qcqp_sensitivity_{sweep_name}",
+                artifact_prefix=f"qcqp_sensitivity_{sweep_name}",
                 colors=colors,
                 line_styles=line_styles,
                 method_labels=method_labels,
                 show_legend=show_convergence_legend,
+                violation_y_min=violation_y_min,
+                plot_objective_gap=plot_objective_gap,
+                plot_gap_plus_violation=plot_gap_plus_violation,
+                artifact_suffix=suffix,
             )
-            artifacts.update(
-                {
-                    f"qcqp_sensitivity_{sweep_name}_objective_gap_{key}{suffix}": _artifact_ref(output_dir, path)
-                    for key, path in gap_paths.items()
-                }
-            )
-        if gap_traces and bool(plot_gap_plus_violation):
-            solution_paths = draw_metric_convergence(
-                gap_traces,
-                "objective_gap_plus_violation",
-                "Opt. gap + violation",
-                instance_root / f"qcqp_sensitivity_{sweep_name}_gap_plus_violation.pdf",
-                log_y=True,
-                y_min_clip=violation_y_min,
-                colors=colors,
-                line_styles=line_styles,
-                method_labels=method_labels,
-                show_legend=show_convergence_legend,
-            )
-            artifacts.update(
-                {
-                    f"qcqp_sensitivity_{sweep_name}_gap_plus_violation_{key}{suffix}": _artifact_ref(output_dir, path)
-                    for key, path in solution_paths.items()
-                }
-            )
+        )
         if bool(plot_runtime_summary):
             runtime_path = _plot_outer_per_iter_runtime(
                 method_records,
@@ -532,7 +532,6 @@ def save_inn_training_visualizations(
                     traj,
                     objective_params=objective_params,
                     grid_size=QCQP_TRAJECTORY_GRID_SIZE,
-                    eval_batch_size=QCQP_TRAJECTORY_EVAL_BATCH_SIZE,
                 )
                 draw_objective_residual_landscape(ax, **landscape, objective_levels=12)
             draw_trajectory(

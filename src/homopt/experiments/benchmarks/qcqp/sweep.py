@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from homopt.experiments.common.artifacts import artifact_mapping, artifact_ref, artifact_root, build_benchmark_payload, save_json, save_table_artifacts
+from homopt.records.artifacts import artifact_mapping, artifact_ref, artifact_root, build_benchmark_payload, save_json, save_table_artifacts
 from homopt.experiments.common.comparison import comparison_metric_source
-from .problem import summarize_qcqp_sweep_rows
+from .reports import summarize_qcqp_sweep_rows
 from .training import (
     _build_qcqp_inn_case_context,
     _load_qcqp_inn_record_from_result,

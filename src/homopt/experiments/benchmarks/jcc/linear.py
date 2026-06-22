@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from homopt.experiments.common.artifacts import artifact_mapping, artifact_ref, artifact_root, build_benchmark_payload, save_json, save_numpy, save_table_artifacts
-from homopt.experiments.common.parametric import normalize_jcc_linear_problem_config, normalize_jcc_linear_solver_configs
+from homopt.records.artifacts import artifact_mapping, artifact_ref, artifact_root, build_benchmark_payload, save_json, save_numpy, save_table_artifacts
 from homopt.experiments.common.comparison import build_comparison_views, make_comparison_row, summarize_comparison_rows_by_method
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.problems import JCCDCOPFProblem, JCCIMProblem, JCCLinearProblem, bind_problem_instance, bind_singleton_problem_instance
 from homopt.solvers import JCCLinearCVaRSolver, JCCLinearRobustScenarioSolver, JCCLinearSolver, solve_exact_result
 from homopt.utils import cast_tensors_to_dtype, set_global_seed
+
+from .setup import normalize_jcc_linear_problem_config, normalize_jcc_linear_solver_configs
 
 
 JCC_LINEAR_SOLVER_RESULT_FIELDS = (

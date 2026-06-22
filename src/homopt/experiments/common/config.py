@@ -300,6 +300,13 @@ def normalize_single_common_config(
         context="common_config",
         message="Use learning_rate, lr_decay, and stepsize_rule; ALM builders map them to outer-loop fields.",
     )
+    if "lr_decay" in payload:
+        payload["outer_lr_decay"] = payload["lr_decay"]
+        payload.setdefault("inner_lr_decay", payload["lr_decay"])
+    if "min_lr" in payload:
+        payload.setdefault("inner_min_lr", payload["min_lr"])
+    if "stepsize_rule" in payload:
+        payload["outer_stepsize_rule"] = payload["stepsize_rule"]
     return payload
 
 
@@ -314,7 +321,59 @@ def normalize_single_algorithm_config(
     *,
     algorithm_config=None,
 ):
-    return deep_merged(None, algorithm_config)
+    normalized = deep_merged(None, algorithm_config)
+    for name, config in list(normalized.items()):
+        if not isinstance(config, dict):
+            continue
+        reject_iteration_budget_keys(config, context=f"algorithm_config for {name}")
+        normalized[name] = normalize_first_order_subproblem_config(name, config)
+    return normalized
+
+
+def _sync_subproblem_iterations(config, *, public_max_key, old_outer_key, inner_key, subproblem_key, context):
+    normalized = copy.deepcopy(config)
+    _reject_config_keys(
+        normalized,
+        keys=(old_outer_key,),
+        context=context,
+        message=f"Use {public_max_key}; it is mapped to the subproblem outer loop.",
+    )
+    subproblem = copy.deepcopy(normalized.get(subproblem_key) or {})
+    if public_max_key in normalized:
+        value = int(normalized.pop(public_max_key))
+        normalized[old_outer_key] = value
+        subproblem["outer_iterations"] = value
+    if inner_key in normalized:
+        subproblem["inner_iterations"] = int(normalized[inner_key])
+    if subproblem:
+        normalized[subproblem_key] = merged(normalized.get(subproblem_key), subproblem)
+    return normalized
+
+
+def normalize_first_order_subproblem_config(algorithm_name, config):
+    """Normalize public PGD/FW subproblem iteration knobs into solver configs."""
+
+    if not config:
+        return config
+    if algorithm_name == "PGD":
+        return _sync_subproblem_iterations(
+            config,
+            public_max_key="projection_max_iterations",
+            old_outer_key="projection_outer_iterations",
+            inner_key="projection_inner_iterations",
+            subproblem_key="projection_subproblem",
+            context="PGD config",
+        )
+    if algorithm_name == "FW":
+        return _sync_subproblem_iterations(
+            config,
+            public_max_key="linearization_max_iterations",
+            old_outer_key="linearization_outer_iterations",
+            inner_key="linearization_inner_iterations",
+            subproblem_key="linearization_subproblem",
+            context="FW config",
+        )
+    return config
 
 
 def normalize_algorithm_config_group(
@@ -421,6 +480,7 @@ __all__ = [
     "normalize_inner_solver_common_config",
     "normalize_jcc_problem_config",
     "normalize_jcc_solver_configs",
+    "normalize_first_order_subproblem_config",
     "normalize_outer_common_config",
     "normalize_single_algorithm_config",
     "normalize_single_common_config",

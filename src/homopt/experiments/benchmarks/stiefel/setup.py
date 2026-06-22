@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 import torch
 
-from homopt.experiments.common.artifacts import artifact_root
+from homopt.records.artifacts import artifact_root
 from homopt.experiments.common.config import normalize_algorithm_config_group
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.mappings import GaugeMap

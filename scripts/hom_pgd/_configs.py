@@ -32,7 +32,7 @@ CONVEX_INEQ_COMPARE_CONFIG = {
     "reference_label": "MOSEK",
     "show_convergence_legend": True,
     "verbose": True,
-    "verbose_interval": 50,
+    "verbose_interval": 1000,
     "include_reference_solver": None,
     "reference_need_opt": True,
     "reference_cache": True,
@@ -58,12 +58,12 @@ CONVEX_INEQ_COMPARE_CONFIG = {
     "algorithm_config": {
         "PGD": {
             "learning_rate": 1e-3,
-            "projection_outer_iterations": 10,
+            "projection_max_iterations": 10,
             "projection_inner_iterations": 100,
         },
         "FW": {
             "learning_rate": 1e-3,
-            "linearization_outer_iterations": 10,
+            "linearization_max_iterations": 10,
             "linearization_inner_iterations": 100,
         },
         "ALM": {
@@ -167,8 +167,6 @@ def poly_star_base_params(
             "nlp_scaling_method": "gradient-based",
         },
         "reference_ipopt_num_starts": 16,
-        # Kept only for explicit reference_solver="grid" debugging runs.
-        "reference_grid_size": 801,
         "common_config": {
             "convergence_threshold": float(convergence_threshold),
             "max_iterations": int(max_iterations),
@@ -187,7 +185,7 @@ def poly_star_base_params(
         },
         "algorithm_config": {
             "PGD": {
-                "projection_outer_iterations": 10,
+                "projection_max_iterations": 10,
                 "projection_inner_iterations": 100,
             },
         },

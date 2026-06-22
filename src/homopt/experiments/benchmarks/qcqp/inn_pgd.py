@@ -7,7 +7,7 @@ from time import perf_counter
 import numpy as np
 import torch
 
-from homopt.experiments.common.artifacts import (
+from homopt.records.artifacts import (
     artifact_mapping,
     artifact_ref,
     build_benchmark_payload,
@@ -15,8 +15,7 @@ from homopt.experiments.common.artifacts import (
     save_json,
     save_table_artifacts,
 )
-from homopt.experiments.common.benchmark import summarize_single_problem_run_record
-from homopt.experiments.common.parametric import (
+from .reports import (
     QCQP_INN_METHOD_NAME,
     extract_qcqp_inn_instance_metrics,
     summarize_qcqp_inn_record,
@@ -35,6 +34,7 @@ from .training import (
     _visualize_instance_indices,
 )
 from homopt.experiments.common.runtime import final_or_nan, trajectory_dim
+from homopt.experiments.common.reports import summarize_single_problem_run_record
 from homopt.optim import INNPGDOptimizer
 from homopt.problems import bind_problem_instance
 from homopt.solvers import QCQPSolver, solve_exact_result
@@ -153,7 +153,7 @@ def _run_qcqp_ipopt_baseline(problem, instance_batch, case_params):
 
 
 def _summarize_qcqp_ipopt_comparison(payload, output_dir, case_params, *, ipopt_rows=None):
-    n_samples = int(case_params.get("num_test_instance", 1))
+    n_samples = int(case_params["num_test_instance"])
     inn_rows = extract_qcqp_inn_instance_metrics(payload, output_dir, n_samples)
     if ipopt_rows is None:
         raise ValueError("ipopt_rows must be computed from the shared QCQP test instance batch.")
@@ -438,21 +438,16 @@ def qcqp_inn_comparison(
     visualize_indices = _visualize_instance_indices(visualize_instance_idx, n_samples)
     multi_visualize = len(visualize_indices) > 1
     if bool(visualize) and artifact_dir is not None and int(n_var) == 2:
-        for instance_idx in visualize_indices:
-            instance_artifacts = save_inn_training_visualizations(
-                output_dir=output_dir,
-                artifact_root_path=artifact_dir,
-                training_record=training_record,
-                obj_traj=_select_batched_history(obj_traj, n_samples, instance_idx),
-                cons_traj=_select_batched_history(cons_traj, n_samples, instance_idx),
-                decision_traj=_select_batched_history(decision_traj, n_samples, instance_idx),
-                problem=data,
-                input_params=instance_batch.inputs[instance_idx : instance_idx + 1],
-                objective_params=instance_batch.objectives[instance_idx : instance_idx + 1],
-                instance_idx=instance_idx,
-                plot_optimizer_diagnostics=False,
-            )
-            _merge_instance_visualization_artifacts(artifacts, instance_artifacts, instance_idx, multi_visualize)
+        training_artifacts = save_inn_training_visualizations(
+            output_dir=output_dir,
+            artifact_root_path=artifact_dir,
+            training_record=training_record,
+            obj_traj=[],
+            cons_traj=[],
+            decision_traj=[],
+            plot_optimizer_diagnostics=False,
+        )
+        artifacts.update(training_artifacts)
         if bool(visualize_mdh_mapping):
             from homopt.viz import visualize_mdh_mapping_transformation
 

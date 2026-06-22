@@ -6,8 +6,6 @@ import math
 from pathlib import Path
 from typing import Mapping, Union
 
-from homopt.utils import ensure_dir
-
 from .context import ExperimentContext
 from .runner import run_and_record
 
@@ -198,9 +196,7 @@ def _print_reference_cache_summary(result):
     print("reference_cache:", " ".join(parts))
 
 
-def print_result_summary(result, output_dir, preset=None):
-    if preset is not None:
-        print("preset:", preset)
+def print_result_summary(result, output_dir):
     print("name:", result.name)
     print("output_dir:", output_dir)
     has_comparison = bool((getattr(result, "metrics", {}) or {}).get("comparison_rows"))
@@ -221,7 +217,8 @@ def default_script_output_dir(name: str, output_root: Union[str, Path, None] = N
 
 
 def record_script_run(name, params, run_fn, output_dir=None):
-    target_dir = ensure_dir(Path(output_dir or default_script_output_dir(name)))
+    target_dir = Path(output_dir or default_script_output_dir(name))
+    target_dir.mkdir(parents=True, exist_ok=True)
     if not isinstance(params, Mapping):
         raise ValueError("Script params must be a mapping.")
     script_params = dict(params)

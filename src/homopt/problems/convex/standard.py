@@ -91,63 +91,17 @@ class ConvexOpt(TensorRuntimeMixin):
             else:
                 violation = (self.constraint_x(x_detached, clip=clip) * dual_var).sum(-1)
             grad = torch.autograd.grad(violation, x_detached, create_graph=False)[0]
-        elif method == 'finite_diff':
-            epsilon = 1e-6
-            grad = torch.zeros_like(x)
-            for i in range(x.shape[1]): # iterate over each variable
-                delta = torch.zeros_like(x)
-                delta[:, i] = epsilon
-                obj_plus = self.constraint_x(x + delta)
-                obj_minus = self.constraint_x(x - delta)
-                grad[:, i] = (obj_plus - obj_minus) / (2 * epsilon)
-        else:
-            batch_size = x.shape[0]
-            # 1. SOC constraints gradient: ||G_i^T x + h_i||_2 <= c_i^T x + d_i
-            grad = []
-            if self.G is not None:
-                grad_soc_list = []
-                for i in range(self.G.shape[0]):  # iterate over each SOC constraint
-                    # Get components for i-th SOC constraint
-                    Gi = self.G[i]  # k x n
-                    hi = self.h[i]  # k
-                    ci = self.C[i]  # n
-
-                    # Compute G_i^T x + h_i
-                    Gix = torch.matmul(x, Gi.T)  # batch x k
-                    Gix_h = Gix + hi.unsqueeze(0)  # batch x k
-
-                    # Compute norm and normalized vector
-                    norms = torch.norm(Gix_h, dim=1, p=2, keepdim=True)  # batch x 1
-
-                    # Avoid division by zero
-                    mask = norms > 1e-10
-                    normalized = torch.zeros_like(Gix_h)
-                    normalized[mask.flatten()] = Gix_h[mask.flatten()] / norms[mask.flatten()]
-
-                    # Gradient for i-th SOC constraint: G_i * normalized - c_i
-                    grad_i = torch.matmul(normalized.unsqueeze(1), Gi) - ci.unsqueeze(0)  # batch x 1 x n
-                    grad_soc_list.append(grad_i)
-
-                # Stack all SOC constraint gradients
-                grad_soc = torch.cat(grad_soc_list, dim=1)  # batch x m_soc x n
-                grad.append(grad_soc)
-
-            # 2. Linear constraints gradient
-            if self.A is not None:
-                grad_lin = self.A  # m x n
-                grad.append(grad_lin)
-            # 3. Box constraints gradient
-            grad_lower = -torch.eye(x.shape[1], device=x.device)  # n x n
-            grad_upper = torch.eye(x.shape[1], device=x.device)   # n x n
-            grad.append(grad_lower)
-            grad.append(grad_upper)
-
-            # Combine all gradients
-            grad = torch.cat([  grad ], dim=1)
+        elif method == 'explicit':
+            residual = self.constraint_x(x, clip=False)
             if dual_var is None:
-                grad =  grad.sum(1)
+                weights = torch.ones_like(residual)
             else:
-                grad = (grad * dual_var.unsqueeze(-1)).sum(1)
+                weights = dual_var
+            if clip:
+                weights = weights * (residual > 0).to(dtype=weights.dtype)
+            grad = self._explicit_inequality_weighted_gradient_x(x, weights)
+        else:
+            raise ValueError(f"Unsupported ConvexOpt constraint gradient method: {method}")
         return grad
 
     def lagrangian_x(self, x, dual_var, penalty_coef=None, proximal_coef=None, x_outer=None):
@@ -239,56 +193,8 @@ class ConvexOpt(TensorRuntimeMixin):
                 x, hom_state = hom_map.forward(z, method=hom_map_method, return_state=True)
             grad_x = self.gradient_objective_x(x)
             grad_z = hom_map.vjp(z, grad_x, method=hom_map_method, state=hom_state)
-        elif method == 'zeroorder':
-            epsilon = 1e-6
-            delta = torch.rand_like(z)
-            delta = delta / torch.norm(delta, dim=1, keepdim=True)
-            obj_plus = self.objective_z(z + epsilon * delta, hom_map)
-            obj_minus = self.objective_z(z - epsilon * delta, hom_map)
-            grad_z = (obj_plus - obj_minus) / (2 * epsilon) * delta
-        elif method == 'finite_diff':
-            epsilon = 1e-6
-            batch_size, dim = z.shape
-
-            # Create a perturbation tensor based on the identity matrix:
-            #   - eye has shape (dim, dim)
-            #   - multiplying it by epsilon gives the per-coordinate perturbation.
-            #   - unsqueeze and expand to shape (batch_size, dim, dim) so that each sample gets its own copy.
-            eye = torch.eye(dim, device=z.device, dtype=z.dtype)
-            perturb = epsilon * eye.unsqueeze(0).expand(batch_size, -1, -1)
-
-            # Expand z to match the perturb tensor shape. z_expanded has shape (batch_size, 1, dim)
-            # and will be broadcast to (batch_size, dim, dim)
-            z_expanded = z.unsqueeze(1)
-
-            # Generate the perturbed inputs for plus and minus directions.
-            # Each sample now has `dim` perturbations, one for each coordinate, resulting in shape (batch_size, dim, dim)
-            z_plus = z_expanded + perturb
-            z_minus = z_expanded - perturb
-
-            # Flatten the first two dimensions from (batch_size, dim, dim) to (batch_size * dim, dim)
-            z_plus_flat = z_plus.reshape(-1, dim)
-            z_minus_flat = z_minus.reshape(-1, dim)
-
-            # Compute the objective function for all perturbed inputs in one batch call.
-            # It is assumed that `self.objective_z` returns a tensor of shape (batch_size * dim,) or (batch_size * dim, 1)
-            obj_plus = self.objective_z(z_plus_flat, hom_map)
-            obj_minus = self.objective_z(z_minus_flat, hom_map)
-
-            # If necessary, squeeze the last dimension to ensure the shape is (batch_size * dim,)
-            if obj_plus.dim() > 1:
-                obj_plus = obj_plus.squeeze(-1)
-            if obj_minus.dim() > 1:
-                obj_minus = obj_minus.squeeze(-1)
-
-            # Reshape the results back to (batch_size, dim)
-            obj_plus = obj_plus.reshape(batch_size, dim)
-            obj_minus = obj_minus.reshape(batch_size, dim)
-
-            # Compute the finite-difference numerical gradient in a vectorized manner.
-            grad_z = (obj_plus - obj_minus) / (2 * epsilon)
         else:
-            raise NotImplementedError
+            raise ValueError(f"Unsupported ConvexOpt z-objective gradient method: {method}")
         return grad_z
 
     def radial_primal_obj(self, x, hom_map=None):

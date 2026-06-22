@@ -1,10 +1,43 @@
-"""Predictor implementations beyond the constant smoke baselines."""
+"""Predictor implementations for learning routes."""
 
 from __future__ import annotations
 
 import torch
 
 from .base import BasePredictor
+
+
+class ConstantPredictor(BasePredictor):
+    """Predict a constant candidate with the same shape as the input batch."""
+
+    name = "constant"
+
+    def __init__(self, value=0.0):
+        self.value = float(value)
+
+    def predict(self, input_like, **kwargs):
+        del kwargs
+        return torch.full_like(input_like, self.value)
+
+
+class ConstantDecisionPredictor(BasePredictor):
+    """Predict a constant decision vector with a fixed decision dimension."""
+
+    name = "constant_decision"
+
+    def __init__(self, decision_dim, value=0.0):
+        self.decision_dim = int(decision_dim)
+        self.value = float(value)
+
+    def predict(self, input_params, **kwargs):
+        del kwargs
+        batch_size = int(input_params.shape[0])
+        return torch.full(
+            (batch_size, self.decision_dim),
+            self.value,
+            dtype=input_params.dtype,
+            device=input_params.device,
+        )
 
 
 def _flatten_context_input(input_tensor):
@@ -31,4 +64,4 @@ class NeuralDecisionPredictor(BasePredictor):
             return self.problem.complete_partial(input_params, y_partial)
 
 
-__all__ = ["NeuralDecisionPredictor"]
+__all__ = ["ConstantDecisionPredictor", "ConstantPredictor", "NeuralDecisionPredictor"]

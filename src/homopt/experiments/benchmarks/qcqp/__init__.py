@@ -1,98 +1,14 @@
-"""QCQP benchmark family."""
+"""QCQP benchmark family public entrypoints."""
 
 from __future__ import annotations
 
-from .inn_pgd import (
-    _ipopt_reference_objectives,
-    _reference_objective_for_instance,
-    _run_qcqp_ipopt_baseline,
-    _save_qcqp_ipopt_comparison_summary,
-    _save_qcqp_ipopt_instance_rows,
-    _summarize_qcqp_ipopt_comparison,
-    qcqp_inn_comparison,
-)
-from .learning import qcqp_learning_benchmark
-from .problem import (
-    QCQP_LEARNING_BASELINES,
-    QCQP_LEARNING_CANONICAL_BASELINES,
-    QCQP_LEARNING_RESULT_FIELDS,
-    QCQP_POSTPROCESS_BASELINES,
-    QCQP_ROUTE_COMPARISON_FIELDS,
-    QCQP_ROUTE_METRIC_FIELDS,
-    build_qcqp_learning_baseline_output,
-    build_qcqp_learning_benchmark_metrics,
-    build_qcqp_learning_context,
-    build_qcqp_problem_args,
-    build_qcqp_problem_context,
-    build_qcqp_route_comparison_views,
-    build_qcqp_route_rows,
-    extract_qcqp_route_metrics,
-    normalize_qcqp_learning_baseline_name,
-    normalize_qcqp_learning_baselines,
-    run_qcqp_learning_route,
-    summarize_qcqp_learning_route_metrics,
-    summarize_qcqp_sweep_rows,
-)
-from .route import qcqp_route_comparison
+from .inn_pgd import qcqp_inn_comparison
 from .sweep import qcqp_inn_experiment, qcqp_inn_sensitivity_sweep
-from .training import (
-    _build_qcqp_inn_case_context,
-    _load_or_train_qcqp_inn_case,
-    _load_qcqp_inn_record_from_result,
-    _merge_instance_visualization_artifacts,
-    _prepare_qcqp_inn_training_case,
-    _prepare_qcqp_inn_training_context,
-    _qcqp_training_cache_dir,
-    _resolve_qcqp_num_test_instance,
-    _sample_qcqp_inn_test_instances,
-    _select_batched_history,
-    _stable_qcqp_training_cache_label,
-    _visualize_instance_indices,
-    inn_training_benchmark,
-)
+from .training import inn_training_benchmark
 
 __all__ = [
-    "QCQP_LEARNING_BASELINES",
-    "QCQP_LEARNING_CANONICAL_BASELINES",
-    "QCQP_LEARNING_RESULT_FIELDS",
-    "QCQP_POSTPROCESS_BASELINES",
-    "QCQP_ROUTE_COMPARISON_FIELDS",
-    "QCQP_ROUTE_METRIC_FIELDS",
-    "_build_qcqp_inn_case_context",
-    "_ipopt_reference_objectives",
-    "_load_or_train_qcqp_inn_case",
-    "_load_qcqp_inn_record_from_result",
-    "_merge_instance_visualization_artifacts",
-    "_prepare_qcqp_inn_training_case",
-    "_prepare_qcqp_inn_training_context",
-    "_qcqp_training_cache_dir",
-    "_reference_objective_for_instance",
-    "_resolve_qcqp_num_test_instance",
-    "_run_qcqp_ipopt_baseline",
-    "_sample_qcqp_inn_test_instances",
-    "_save_qcqp_ipopt_comparison_summary",
-    "_save_qcqp_ipopt_instance_rows",
-    "_select_batched_history",
-    "_stable_qcqp_training_cache_label",
-    "_summarize_qcqp_ipopt_comparison",
-    "_visualize_instance_indices",
-    "build_qcqp_learning_baseline_output",
-    "build_qcqp_learning_benchmark_metrics",
-    "build_qcqp_learning_context",
-    "build_qcqp_problem_args",
-    "build_qcqp_problem_context",
-    "build_qcqp_route_comparison_views",
-    "build_qcqp_route_rows",
-    "extract_qcqp_route_metrics",
     "inn_training_benchmark",
-    "normalize_qcqp_learning_baseline_name",
-    "normalize_qcqp_learning_baselines",
     "qcqp_inn_comparison",
     "qcqp_inn_experiment",
     "qcqp_inn_sensitivity_sweep",
-    "qcqp_learning_benchmark",
-    "qcqp_route_comparison",
-    "run_qcqp_learning_route",
-    "summarize_qcqp_learning_route_metrics",
-    "summarize_qcqp_sweep_rows",
 ]

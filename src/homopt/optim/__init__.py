@@ -6,22 +6,22 @@ from importlib import import_module
 
 
 _SYMBOL_TO_TARGET = {
-    "AdamOptimizer": ("homopt.optim.shared", "AdamOptimizer"),
+    "AdamOptimizer": ("homopt.optim.core", "AdamOptimizer"),
     "BaseOptimizer": ("homopt.optim.base", "BaseOptimizer"),
     "FrankWolfeOptimizer": ("homopt.optim.first_order", "FrankWolfeOptimizer"),
-    "GDOptimizer": ("homopt.optim.shared", "GDOptimizer"),
-    "EqualityConstrainedALMOptimizer": ("homopt.optim.lagrangian", "EqualityConstrainedALMOptimizer"),
-    "HomALMOptimizer": ("homopt.optim.hom_alm", "HomALMOptimizer"),
+    "GDOptimizer": ("homopt.optim.core", "GDOptimizer"),
+    "EqualityConstrainedALMOptimizer": ("homopt.optim.alm", "EqualityConstrainedALMOptimizer"),
+    "HomALMOptimizer": ("homopt.optim.alm", "HomALMOptimizer"),
     "HomPGDOptimizer": ("homopt.optim.first_order", "HomPGDOptimizer"),
-    "INNPGDOptimizer": ("homopt.optim.inn_pgd", "INNPGDOptimizer"),
-    "LagrangianOptimizer": ("homopt.optim.lagrangian", "LagrangianOptimizer"),
-    "NormalizedGDOptimizer": ("homopt.optim.shared", "NormalizedGDOptimizer"),
+    "INNPGDOptimizer": ("homopt.optim.inn", "INNPGDOptimizer"),
+    "LagrangianOptimizer": ("homopt.optim.alm", "LagrangianOptimizer"),
+    "NormalizedGDOptimizer": ("homopt.optim.core", "NormalizedGDOptimizer"),
     "PGDOptimizer": ("homopt.optim.first_order", "PGDOptimizer"),
     "RadialDualOptimizer": ("homopt.optim.first_order", "RadialDualOptimizer"),
-    "StiefelALMEQPGDOptimizer": ("homopt.optim.stiefel", "StiefelALMEQPGDOptimizer"),
-    "StiefelRetractionALMOptimizer": ("homopt.optim.stiefel", "StiefelRetractionALMOptimizer"),
-    "StiefelRetractionOptimizer": ("homopt.optim.stiefel", "StiefelRetractionOptimizer"),
-    "pgd_transformed_space": ("homopt.optim.inn_pgd", "pgd_transformed_space"),
+    "StiefelALMEQPGDOptimizer": ("homopt.optim.manifolds", "StiefelALMEQPGDOptimizer"),
+    "StiefelRetractionALMOptimizer": ("homopt.optim.manifolds", "StiefelRetractionALMOptimizer"),
+    "StiefelRetractionOptimizer": ("homopt.optim.manifolds", "StiefelRetractionOptimizer"),
+    "pgd_transformed_space": ("homopt.optim.inn", "pgd_transformed_space"),
     "run_algorithm": ("homopt.optim.dispatch", "run_algorithm"),
 }
 

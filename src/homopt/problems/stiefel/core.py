@@ -236,12 +236,18 @@ class StiefelProblem(TensorRuntimeMixin):
         x = hom_map.forward(z, method=hom_map_method)
         return self.objective_x(x)
 
-    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd"):
-        if method != "autograd":
-            raise NotImplementedError("StiefelProblem only supports autograd objective_z gradients.")
-        z_detached = z.detach().requires_grad_(True)
-        obj = self.objective_z(z_detached, hom_map, hom_map_method=hom_map_method)
-        return torch.autograd.grad(obj.sum(), z_detached, create_graph=False)[0]
+    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd", x=None, hom_state=None):
+        if method == "autograd":
+            z_detached = z.detach().requires_grad_(True)
+            obj = self.objective_z(z_detached, hom_map, hom_map_method=hom_map_method)
+            return torch.autograd.grad(obj.sum(), z_detached, create_graph=False)[0]
+        if method == "explicit":
+            if hom_map is None:
+                raise ValueError("hom_map is required for explicit Stiefel z-space objective gradient.")
+            if x is None:
+                x, hom_state = hom_map.forward(z, method=hom_map_method, return_state=True)
+            return hom_map.vjp(z, self.gradient_objective_x(x), method=hom_map_method, state=hom_state)
+        raise ValueError(f"Unsupported Stiefel z-objective gradient method: {method}")
 
     def lagrangian_z(
         self,

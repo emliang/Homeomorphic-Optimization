@@ -4,6 +4,7 @@ from __future__ import annotations
 
 SCRIPT_EXPERIMENTS = {
     "adversarial_attack": "scripts/hom_pgd/run_adversarial_attack.py",
+    "acopf_predictor_postprocess": "scripts/learning_postprocess/run_acopf_predictor_postprocess.py",
     "convex_eq_2d": "scripts/hom_alm/run_convex_eq_2d.py",
     "convex_eq_compare": "scripts/hom_alm/run_convex_eq_compare.py",
     "convex_ineq_compare": "scripts/hom_pgd/run_convex_ineq_compare.py",
@@ -14,7 +15,6 @@ SCRIPT_EXPERIMENTS = {
     "qcqp_inn_ablation": "scripts/inn_pgd/run_qcqp_inn_ablation.py",
     "qcqp_inn_compare": "scripts/inn_pgd/run_qcqp_inn_compare.py",
     "qcqp_inn_toy": "scripts/inn_pgd/run_qcqp_inn_toy.py",
-    "qcqp_predictor_postprocess": "scripts/learning_postprocess/run_qcqp_predictor_postprocess.py",
     "stiefel_eq_compare": "scripts/hom_alm/run_stiefel_eq_compare.py",
 }
 
@@ -48,8 +48,8 @@ EXPERIMENT_FAMILIES = {
     "learning_postprocess": {
         "description": "Neural predictor plus post-processing baselines.",
         "scripts": [
+            "acopf_predictor_postprocess",
             "convex_parametric_predictor_postprocess",
-            "qcqp_predictor_postprocess",
         ],
     },
 }

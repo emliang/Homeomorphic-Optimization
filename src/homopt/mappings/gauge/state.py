@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from .constants import FAMILY_BOX_LOWER, FAMILY_BOX_UPPER, FAMILY_LINEAR, FAMILY_QUAD, FAMILY_SOC
+from .constants import FAMILY_BOX_LOWER, FAMILY_BOX_UPPER, FAMILY_GENERAL, FAMILY_LINEAR, FAMILY_QUAD, FAMILY_SOC
 from .constraints import explicit_candidate_cache
 from .gradients import best_beta_gradient_u, smooth_polynomial_beta_gradient_u
 
@@ -31,6 +31,8 @@ def explicit_forward_state(
     pq,
     quad_gradB_const,
     quad_Ccoef,
+    general_beta=None,
+    general_grad_u=None,
     smooth_family_codes=None,
     smooth_candidate_index=None,
     gradient_rule="polynomial",
@@ -69,7 +71,7 @@ def explicit_forward_state(
         Qsym=Qsym,
         quad_gradB_const=quad_gradB_const,
         quad_Ccoef=quad_Ccoef,
-        need_grad_aux=(gradient_rule in {"implicit", "polynomial", "hybrid"}),
+        need_grad_aux=(gradient_rule in {"implicit", "polynomial", "hybrid"}) and not smooth_enabled,
         reduce=reduce_mode,
     )
 
@@ -102,6 +104,8 @@ def explicit_forward_state(
         local_beta = candidate_cache.get("alpha_quad")
         if local_beta is not None:
             _append_full_candidate(local_beta, FAMILY_QUAD)
+        if general_beta is not None:
+            _append_full_candidate(general_beta, FAMILY_GENERAL)
 
         if not beta_columns:
             raise ValueError("No supported constraints available for explicit gauge backward.")
@@ -148,10 +152,30 @@ def explicit_forward_state(
                 C=C,
                 soc_gradB_const=soc_gradB_const,
                 soc_Ccoef=soc_Ccoef,
+                Qsym=Qsym,
                 quad_gradB_const=quad_gradB_const,
                 quad_Ccoef=quad_Ccoef,
+                general_grad_u=general_grad_u,
             )
         else:
+            candidate_cache = explicit_candidate_cache(
+                u,
+                eps=eps,
+                A=A,
+                inv_slack=inv_slack,
+                inv_lower_denom=inv_lower_denom,
+                inv_upper_denom=inv_upper_denom,
+                G=G,
+                C=C,
+                Gx0=Gx0,
+                Cx0=Cx0,
+                soc_Ccoef=soc_Ccoef,
+                Qsym=Qsym,
+                quad_gradB_const=quad_gradB_const,
+                quad_Ccoef=quad_Ccoef,
+                need_grad_aux=True,
+                reduce="full",
+            )
             best_grad_u = torch.zeros(batch_size, nvar, device=device, dtype=dtype)
             smooth_cache = dict(candidate_cache)
             for active_pos in range(candidate_beta.shape[1]):
@@ -188,6 +212,7 @@ def explicit_forward_state(
                     pq=pq,
                     quad_gradB_const=quad_gradB_const,
                     quad_Ccoef=quad_Ccoef,
+                    general_grad_u=general_grad_u,
                 )
                 best_grad_u = best_grad_u + weights[:, active_pos : active_pos + 1] * grad_i
 
@@ -226,6 +251,13 @@ def explicit_forward_state(
     local_beta = candidate_cache.get("quad_beta")
     if local_beta is not None:
         _append_candidate(local_beta, FAMILY_QUAD, candidate_cache["quad_idx"])
+
+    if general_beta is not None:
+        general_count = int(general_beta.shape[1])
+        general_idx = torch.arange(general_count, device=device, dtype=torch.long).view(1, -1).expand(batch_size, -1)
+        beta_columns.append(general_beta)
+        family_codes.extend([FAMILY_GENERAL] * general_count)
+        index_columns.append(general_idx)
 
     if beta_columns:
         candidate_beta = torch.cat(beta_columns, dim=1)
@@ -266,6 +298,7 @@ def explicit_forward_state(
         pq=pq,
         quad_gradB_const=quad_gradB_const,
         quad_Ccoef=quad_Ccoef,
+        general_grad_u=general_grad_u,
     )
 
     beta = best_beta
@@ -282,4 +315,3 @@ def explicit_forward_state(
         "best_family": best_family,
         "best_index": best_index,
     }
-

@@ -11,11 +11,13 @@ from .constraints import explicit_candidate_cache
 from .constants import (
     FAMILY_BOX_LOWER as _FAMILY_BOX_LOWER,
     FAMILY_BOX_UPPER as _FAMILY_BOX_UPPER,
+    FAMILY_GENERAL as _FAMILY_GENERAL,
     FAMILY_LINEAR as _FAMILY_LINEAR,
     FAMILY_QUAD as _FAMILY_QUAD,
     FAMILY_SOC as _FAMILY_SOC,
 )
 from .gradients import explicit_vjp_from_state
+from .general import general_boundary_candidates
 from .math import _pairwise_max, _safe_divide
 from .state import explicit_forward_state
 
@@ -30,6 +32,10 @@ class GaugeMap:
         explicit_gradient_rule="polynomial",
         smooth_tie_tol=1e-7,
         smooth_temperature=1e-4,
+        general_bisection_iterations=60,
+        general_bisection_expand_steps=40,
+        general_bisection_initial_radius=1.0,
+        general_bisection_max_radius=1e6,
     ):
         self.constraint_set = convex_set
         self.p_norm = p_norm
@@ -43,6 +49,10 @@ class GaugeMap:
         self.smooth_temperature = float(smooth_temperature)
         if self.smooth_temperature <= 0:
             raise ValueError("smooth_temperature must be positive.")
+        self.general_bisection_iterations = int(general_bisection_iterations)
+        self.general_bisection_expand_steps = int(general_bisection_expand_steps)
+        self.general_bisection_initial_radius = float(general_bisection_initial_radius)
+        self.general_bisection_max_radius = float(general_bisection_max_radius)
         self._eps = 1e-12
         self._static_cache = {}
         self.last_forward_mode = "uninitialized"
@@ -65,6 +75,23 @@ class GaugeMap:
             if not self._supports_explicit():
                 raise NotImplementedError("GaugeMap explicit forward requires p_norm=2 and supported constraints.")
             terms = self._get_static_terms(z.device, z.dtype)
+            raw_r = torch.norm(z, dim=1, p=2, keepdim=True)
+            u = z / raw_r.clamp_min(self._eps)
+            center_mask = raw_r <= self._eps
+            if center_mask.any():
+                fallback_u = torch.zeros_like(u)
+                fallback_u[:, 0] = 1
+                u = torch.where(center_mask, fallback_u, u)
+            general_beta, general_grad_u = self._general_boundary_candidates(
+                u,
+                terms["x0"],
+                need_gradient=True,
+            )
+            smooth_family_codes = terms.get("smooth_family_codes")
+            smooth_candidate_index = terms.get("smooth_candidate_index")
+            if general_beta is not None:
+                smooth_family_codes = None
+                smooth_candidate_index = None
             state = explicit_forward_state(
                 z,
                 center=terms["x0"],
@@ -86,8 +113,10 @@ class GaugeMap:
                 pq=terms.get("pq"),
                 quad_gradB_const=terms.get("quad_gradB_const"),
                 quad_Ccoef=terms.get("Cq0"),
-                smooth_family_codes=terms.get("smooth_family_codes"),
-                smooth_candidate_index=terms.get("smooth_candidate_index"),
+                general_beta=general_beta,
+                general_grad_u=general_grad_u,
+                smooth_family_codes=smooth_family_codes,
+                smooth_candidate_index=smooth_candidate_index,
                 gradient_rule=self.explicit_gradient_rule,
             )
             self.last_forward_mode = "explicit"
@@ -276,6 +305,11 @@ class GaugeMap:
             count = int(terms["Qsym"].shape[0])
             family_parts.append(torch.full((count,), _FAMILY_QUAD, device=device, dtype=torch.long))
             index_parts.append(torch.arange(count, device=device, dtype=torch.long))
+        general_count = self._general_constraint_count(x0)
+        if general_count:
+            count = int(general_count)
+            family_parts.append(torch.full((count,), _FAMILY_GENERAL, device=device, dtype=torch.long))
+            index_parts.append(torch.arange(count, device=device, dtype=torch.long))
         if family_parts:
             terms["smooth_family_codes"] = torch.cat(family_parts)
             terms["smooth_candidate_index"] = torch.cat(index_parts)
@@ -290,22 +324,41 @@ class GaugeMap:
                 getattr(self.constraint_set, "L", None) is not None,
                 getattr(self.constraint_set, "G", None) is not None,
                 getattr(self.constraint_set, "Qq", None) is not None,
+                self._has_general_convex_constraints(),
             )
         )
         return (self.p_norm == 2) and has_supported_constraints
 
-    def _bisection_point_to_boundary_distance(self, u):
-        batch = u.shape[0]
-        au = torch.ones(batch, 1, device=u.device) * 5
-        al = torch.zeros(batch, 1, device=u.device)
-        while (au - al).max() > 1e-6:
-            am = (au + al) / 2
-            points = self.center + am * u
-            residual = self.constraint_set.constraint_x(points)
-            feasible_mask = residual.max(1, keepdim=True)[0] <= 1e-5
-            al[feasible_mask] = am[feasible_mask]
-            au[~feasible_mask] = am[~feasible_mask]
-        return al
+    def _has_general_convex_constraints(self):
+        return callable(getattr(self.constraint_set, "general_convex_constraint_x", None)) and callable(
+            getattr(self.constraint_set, "general_convex_constraint_gradient_x", None)
+        )
+
+    def _general_constraint_count(self, center):
+        if not self._has_general_convex_constraints():
+            return 0
+        values = self.constraint_set.general_convex_constraint_x(center)
+        if values.ndim == 1:
+            return 1
+        if values.ndim != 2:
+            raise ValueError("General convex constraint values must have shape (batch, n_constraints).")
+        return int(values.shape[1])
+
+    def _general_boundary_candidates(self, u, center, *, need_gradient):
+        if not self._has_general_convex_constraints():
+            return None, None
+        return general_boundary_candidates(
+            u,
+            center=center,
+            constraint_fn=self.constraint_set.general_convex_constraint_x,
+            gradient_fn=self.constraint_set.general_convex_constraint_gradient_x,
+            eps=self._eps,
+            initial_radius=self.general_bisection_initial_radius,
+            max_radius=self.general_bisection_max_radius,
+            expand_steps=self.general_bisection_expand_steps,
+            iterations=self.general_bisection_iterations,
+            need_gradient=need_gradient,
+        )
 
     def _closed_form_point_to_boundary_distance(self, u):
         terms = self._get_static_terms(u.device, u.dtype)
@@ -332,6 +385,7 @@ class GaugeMap:
             need_grad_aux=False,
             reduce=reduce_mode,
         )
+        general_beta, _ = self._general_boundary_candidates(u, terms["x0"], need_gradient=False)
 
         def _consume(candidate):
             nonlocal max_alpha
@@ -352,6 +406,8 @@ class GaugeMap:
             candidate = candidate_cache.get(key)
             if candidate is not None:
                 _consume(candidate)
+        if general_beta is not None:
+            _consume(general_beta)
         if self.smooth:
             if not smooth_candidates:
                 raise ValueError("GaugeMap requires at least one supported constraint family.")

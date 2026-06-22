@@ -14,7 +14,8 @@ from .common import _load_model_for_dataset, _save_checkpoint_artifact, _save_js
 from .config import _build_attack_weight_matrix, _normalized_attack_config
 from .data import get_model_checkpoint, load_data
 from .selection import _filter_correctly_classified_indices, find_accurately_classified_samples
-from homopt.utils import ensure_dir, set_global_seed
+from homopt.experiments.common.io import ensure_dir
+from homopt.utils import set_global_seed
 
 
 def evaluate_adversarial_attacks(

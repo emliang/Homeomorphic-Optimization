@@ -5,9 +5,9 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from homopt.experiments.common.artifacts import artifact_mapping, build_benchmark_payload, save_table_artifacts
+from homopt.records.artifacts import artifact_mapping, build_benchmark_payload, save_table_artifacts
 from homopt.experiments.common.comparison import comparison_metric_source
-from .problem import (
+from .reports import (
     QCQP_ROUTE_COMPARISON_FIELDS,
     build_qcqp_route_comparison_views,
     build_qcqp_route_rows,

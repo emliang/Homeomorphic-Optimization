@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import time
 
-from homopt.optim.common import _collect_optimizer_timing_metrics, _pack_run_result
+from homopt.optim.core import _collect_optimizer_timing_metrics, _normalize_optimizer_result
 from homopt.optim.first_order import FrankWolfeOptimizer, HomPGDOptimizer, PGDOptimizer, RadialDualOptimizer
-from homopt.optim.hom_alm import HomALMOptimizer
-from homopt.optim.lagrangian import EqualityConstrainedALMOptimizer, LagrangianOptimizer
+from homopt.optim.alm import EqualityConstrainedALMOptimizer, HomALMOptimizer, LagrangianOptimizer
 
 
 _EQ_CVXPY_ALGORITHMS = ('Penalty-EQ', 'Prox-Penalty-EQ', 'ALM-EQ', 'Prox-ALM-EQ')
@@ -28,49 +27,36 @@ def _algorithm_specs():
         return algorithm_params
 
     specs = {
-        'PGD': (lambda problem, params, hom_map: PGDOptimizer(problem, params['PGD']), False),
-        'Penalty': (
-            lambda problem, params, hom_map: LagrangianOptimizer(
-                problem,
-                _params_for_algorithm(params, "Penalty"),
-            ),
-            False,
+        'PGD': lambda problem, params, hom_map: PGDOptimizer(problem, params['PGD']),
+        'Penalty': lambda problem, params, hom_map: LagrangianOptimizer(
+            problem,
+            _params_for_algorithm(params, "Penalty"),
         ),
-        'Prox-Penalty': (
-            lambda problem, params, hom_map: LagrangianOptimizer(
-                problem,
-                _params_for_algorithm(params, "Prox-Penalty", force_proximal=True),
-            ),
-            False,
+        'Prox-Penalty': lambda problem, params, hom_map: LagrangianOptimizer(
+            problem,
+            _params_for_algorithm(params, "Prox-Penalty", force_proximal=True),
         ),
-        'ALM': (lambda problem, params, hom_map: LagrangianOptimizer(problem, params['ALM']), False),
-        'Prox-ALM': (
-            lambda problem, params, hom_map: LagrangianOptimizer(
-                problem,
-                _params_for_algorithm(params, "Prox-ALM", force_proximal=True),
-            ),
-            False,
+        'ALM': lambda problem, params, hom_map: LagrangianOptimizer(problem, params['ALM']),
+        'Prox-ALM': lambda problem, params, hom_map: LagrangianOptimizer(
+            problem,
+            _params_for_algorithm(params, "Prox-ALM", force_proximal=True),
         ),
-        'Hom-PGD': (lambda problem, params, hom_map: HomPGDOptimizer(problem, params['Hom-PGD'], hom_map=hom_map), True),
-        'Hom-ALM': (lambda problem, params, hom_map: HomALMOptimizer(problem, params['Hom-ALM'], hom_map=hom_map), True),
-        'Prox-Hom-ALM': (
-            lambda problem, params, hom_map: HomALMOptimizer(
-                problem,
-                _params_for_algorithm(params, "Prox-Hom-ALM", force_proximal=True),
-                hom_map=hom_map,
-            ),
-            True,
+        'Hom-PGD': lambda problem, params, hom_map: HomPGDOptimizer(problem, params['Hom-PGD'], hom_map=hom_map),
+        'Hom-ALM': lambda problem, params, hom_map: HomALMOptimizer(problem, params['Hom-ALM'], hom_map=hom_map),
+        'Prox-Hom-ALM': lambda problem, params, hom_map: HomALMOptimizer(
+            problem,
+            _params_for_algorithm(params, "Prox-Hom-ALM", force_proximal=True),
+            hom_map=hom_map,
         ),
-        'FW': (lambda problem, params, hom_map: FrankWolfeOptimizer(problem, params['FW']), False),
-        'RD': (lambda problem, params, hom_map: RadialDualOptimizer(problem, params['RD'], hom_map=hom_map), True),
+        'FW': lambda problem, params, hom_map: FrankWolfeOptimizer(problem, params['FW']),
+        'RD': lambda problem, params, hom_map: RadialDualOptimizer(problem, params['RD'], hom_map=hom_map),
     }
     specs.update({
         name: (
             lambda problem, params, hom_map, algorithm=name: EqualityConstrainedALMOptimizer(
                 problem,
                 _params_for_algorithm(params, algorithm, force_proximal=algorithm.startswith("Prox-")),
-            ),
-            False,
+            )
         )
         for name in _EQ_CVXPY_ALGORITHMS
     })
@@ -84,7 +70,7 @@ def run_algorithm(name, problem, params, hom_map=None, init_point=None):
     if name not in specs:
         raise ValueError(f"Unknown algorithm: {name}")
     seed = params['common']['seed']
-    builder, returns_transform_time = specs[name]
+    builder = specs[name]
     optimizer = builder(problem, params, hom_map)
     if hom_map is not None and hasattr(hom_map, "reset_forward_stats"):
         hom_map.reset_forward_stats()
@@ -105,26 +91,9 @@ def run_algorithm(name, problem, params, hom_map=None, init_point=None):
                 "hom_map_smooth_temperature": float(getattr(hom_map, "smooth_temperature", 0.0)),
             }
         )
-    if returns_transform_time:
-        final_decision, decision_trajectory, objective_trajectory, violation_trajectory, per_iter_time, last_trans_time = result
-        latent_trajectory = getattr(optimizer, "last_z_trajectory", None)
-        return _pack_run_result(
-            final_decision,
-            decision_trajectory,
-            objective_trajectory,
-            violation_trajectory,
-            per_iter_time,
-            last_trans_time=last_trans_time,
-            latent_trajectory=latent_trajectory,
-            extra_metrics=extra_metrics,
-        )
-    final_decision, decision_trajectory, objective_trajectory, violation_trajectory, per_iter_time = result
-    return _pack_run_result(
-        final_decision,
-        decision_trajectory,
-        objective_trajectory,
-        violation_trajectory,
-        per_iter_time,
+    return _normalize_optimizer_result(
+        result,
+        optimizer=optimizer,
         extra_metrics=extra_metrics,
     )
 

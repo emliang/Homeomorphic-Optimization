@@ -112,6 +112,49 @@ experiments cover:
 - MaxCut SDP-style feasible regions;
 - adversarial-attack feasible balls and weighted norm constraints.
 
+### Gauge Mapping
+
+`GaugeMap` is the main map used for convex inequality sets. It maps a latent
+point `z` to a feasible decision by radially scaling from an interior center
+`x0`. Equality constraints are not part of the gauge map; they are handled by
+ALM/PALM-style layers.
+
+The problem object supplies constraint tensors. A missing attribute or `None`
+disables that constraint family.
+
+| Family | Attributes | Form |
+| --- | --- | --- |
+| Linear | `A`, `b` | `A x <= b` |
+| Box lower | `L` | `L <= x` |
+| Box upper | `U` | `x <= U` |
+| SOC | `G`, `h`, `C`, `d` | `||G_i x + h_i|| <= C_i x + d_i` |
+| Quadratic | `Qq`, `pq`, `bq` | `0.5 x^T Q_i x + pq_i^T x <= bq_i` |
+
+For each latent point, the map computes a ray direction and the active boundary
+candidate:
+
+$$
+r = \|z\|_2, \qquad u = z / r, \qquad
+\beta = \max_j \beta_j(u),
+$$
+
+then returns
+
+$$
+\psi(z) = x_0 + \frac{z}{\beta}.
+$$
+
+With `smooth=False`, `GaugeMap` uses the hard maximum candidate. With
+`smooth=True`, it smooths only candidates tied near the hard maximum according
+to `smooth_tie_tol`.
+
+For gradients, `method="autograd"` lets PyTorch differentiate the forward
+computation. `method="explicit"` stores the forward state and applies a custom
+VJP, which is the main fast path used by Hom-PGD. The explicit path supports
+`hom_map_explicit_gradient_rule` values `polynomial`, `implicit`, and `hybrid`.
+The current explicit gauge implementation assumes `hom_p_norm=2`; unsupported
+constraint families should fail explicitly rather than silently falling back.
+
 ## Experiments
 
 | File | Purpose |

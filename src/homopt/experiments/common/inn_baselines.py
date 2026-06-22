@@ -21,7 +21,7 @@ from .config import (
     align_outer_iterations_with_max_iterations,
     reject_iteration_budget_keys,
 )
-from .method_specs import build_penalty_method_params
+from .methods import build_penalty_method_params
 
 
 INN_LAGRANGIAN_BASELINE_ORDER = ("ALM", "Penalty", "Prox-Penalty")
@@ -65,22 +65,22 @@ def build_inn_lagrangian_common_config(seed, config):
         )
     return {
         "seed": int(seed),
-        "learning_rate": float(config.get("learning_rate", 1e-3)),
-        "inner_learning_rate": float(config.get("inner_learning_rate", config.get("learning_rate", 1e-3))),
-        "max_running_time": float(config.get("max_running_time", 300)),
-        "convergence_threshold": float(config.get("convergence_threshold", 1e-6)),
-        "opt": str(config.get("opt", "gd")),
-        "momentum": float(config.get("momentum", 0.0)),
-        "lr_decay": float(config.get("lr_decay", 0.9)),
-        "outer_lr_decay": float(config.get("lr_decay", 0.9)),
-        "inner_lr_decay": float(config.get("inner_lr_decay", config.get("lr_decay", 0.9))),
+        "learning_rate": float(config["learning_rate"]),
+        "inner_learning_rate": float(config["inner_learning_rate"]),
+        "max_running_time": float(config["max_running_time"]),
+        "convergence_threshold": float(config["convergence_threshold"]),
+        "opt": str(config["opt"]),
+        "momentum": float(config["momentum"]),
+        "lr_decay": float(config["lr_decay"]),
+        "outer_lr_decay": float(config["lr_decay"]),
+        "inner_lr_decay": float(config["inner_lr_decay"]),
         "min_lr": float(config["min_lr"]),
-        "inner_min_lr": float(config.get("inner_min_lr", config["min_lr"])),
-        "stepsize_rule": str(config.get("stepsize_rule", "adaptive")),
-        "outer_stepsize_rule": str(config.get("stepsize_rule", "adaptive")),
-        "verbose": bool(config.get("verbose", False)),
-        "verbose_interval": int(config.get("verbose_interval", 50)),
-        "proximal_coef": float(config.get("proximal_coef", 0.1)),
+        "inner_min_lr": float(config["inner_min_lr"]),
+        "stepsize_rule": str(config["stepsize_rule"]),
+        "outer_stepsize_rule": str(config["stepsize_rule"]),
+        "verbose": bool(config["verbose"]),
+        "verbose_interval": int(config["verbose_interval"]),
+        "proximal_coef": float(config["proximal_coef"]),
     }
 
 
@@ -92,20 +92,20 @@ def build_inn_lagrangian_method_params(seed, baseline_config, *, max_iterations=
         context="INN-PGD lagrangian_baseline_config",
     )
     common = build_inn_lagrangian_common_config(seed, baseline_config)
-    outer_iterations = int(baseline_config.get("outer_iterations", 50))
-    inner_iterations = int(baseline_config.get("inner_iterations", 10))
+    outer_iterations = int(baseline_config["outer_iterations"])
+    inner_iterations = int(baseline_config["inner_iterations"])
     kwargs = {
         "outer_iterations": outer_iterations,
         "inner_iterations": inner_iterations,
-        "dual_learning_rate": float(baseline_config.get("dual_learning_rate", 1e-1)),
-        "penalty_coef": float(baseline_config.get("penalty_coef", 10.0)),
-        "penalty_growth": float(baseline_config.get("penalty_growth", 1.1)),
-        "proximal_coef": float(baseline_config.get("proximal_coef", common["proximal_coef"])),
-        "max_penalty": float(baseline_config.get("max_penalty", 1e2)),
-        "max_dual": float(baseline_config.get("max_dual", 1e2)),
-        "inner_stepsize_rule": str(baseline_config.get("inner_stepsize_rule", "constant")),
-        "inner_solver": str(baseline_config.get("inner_solver", "gd")),
-        "lagrangian_gradient": str(baseline_config.get("lagrangian_gradient", "explicit")),
+        "dual_learning_rate": float(baseline_config["dual_learning_rate"]),
+        "penalty_coef": float(baseline_config["penalty_coef"]),
+        "penalty_growth": float(baseline_config["penalty_growth"]),
+        "proximal_coef": float(baseline_config["proximal_coef"]),
+        "max_penalty": float(baseline_config["max_penalty"]),
+        "max_dual": float(baseline_config["max_dual"]),
+        "inner_stepsize_rule": str(baseline_config["inner_stepsize_rule"]),
+        "inner_solver": str(baseline_config["inner_solver"]),
+        "lagrangian_gradient": str(baseline_config["lagrangian_gradient"]),
     }
     return {
         "common": common,

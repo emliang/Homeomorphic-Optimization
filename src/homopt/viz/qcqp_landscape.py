@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from .evaluation import expand_input_params, problem_tensor_kwargs
+from .grid import grid_points_from_bounds, iter_point_batches
 from .inn_records import _as_numpy_1d
 from .primitives import draw_objective_residual_landscape, draw_unit_ball
 from .style import PAPER_STYLE, apply_paper_axis_style, set_axis_labels
@@ -12,33 +14,10 @@ from .style import PAPER_STYLE, apply_paper_axis_style, set_axis_labels
 QCQP_LATENT_TRAJECTORY_VIEW_LIM = 1.5
 
 
-def _problem_tensor_kwargs(problem):
-    tensor = getattr(problem, "fixed_Q", None)
-    if torch.is_tensor(tensor):
-        return {"device": tensor.device, "dtype": tensor.dtype}
-    return {
-        "device": getattr(problem, "device", torch.device("cpu")),
-        "dtype": torch.float32,
-    }
-
-
-def _expand_input_params(input_params, n_points, *, device, dtype):
-    if input_params is None:
-        return None
-    if not torch.is_tensor(input_params):
-        input_params = torch.as_tensor(input_params, device=device, dtype=dtype)
-    else:
-        input_params = input_params.to(device=device, dtype=dtype)
-    if input_params.ndim == 1:
-        input_params = input_params.view(1, -1)
-    first = input_params[:1]
-    return first.expand(n_points, *first.shape[1:])
-
-
 def _evaluate_objective(problem, input_batch, points, objective_params=None):
     if objective_params is not None and hasattr(problem, "objective_xy"):
         tensor_kwargs = {"device": points.device, "dtype": points.dtype}
-        objective_batch = _expand_input_params(objective_params, points.shape[0], **tensor_kwargs)
+        objective_batch = expand_input_params(objective_params, points.shape[0], **tensor_kwargs)
         return problem.objective_xy(input_batch, points, objective_batch).reshape(-1)
     if hasattr(problem, "objective"):
         return problem.objective(points).reshape(-1)
@@ -57,14 +36,6 @@ def _trajectory_bounds(problem, traj, *, padding=0.25):
     center = 0.5 * (low + high)
     half_span = 0.5 * max(float(np.max(high - low)), 1.0)
     return center - half_span, center + half_span
-
-
-def _iter_point_batches(n_points, batch_size):
-    batch_size = int(batch_size) if batch_size is not None else int(n_points)
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive.")
-    for start in range(0, int(n_points), batch_size):
-        yield start, min(start + batch_size, int(n_points))
 
 
 def _constraint_residual(problem, input_batch, x_points):
@@ -87,13 +58,13 @@ def _evaluate_qcqp_points(problem, input_batch, x_points, *, objective_params=No
 
 
 def _evaluate_qcqp_grid(problem, input_params, points_np, *, objective_params=None, batch_size=None):
-    tensor_kwargs = _problem_tensor_kwargs(problem)
+    tensor_kwargs = problem_tensor_kwargs(problem)
     objective_np = np.empty(points_np.shape[0], dtype=float)
     residual_np = np.empty(points_np.shape[0], dtype=float)
     with torch.no_grad():
-        for start, end in _iter_point_batches(points_np.shape[0], batch_size):
+        for start, end in iter_point_batches(points_np.shape[0], batch_size):
             points = torch.as_tensor(points_np[start:end], **tensor_kwargs)
-            input_batch = _expand_input_params(input_params, points.shape[0], **tensor_kwargs)
+            input_batch = expand_input_params(input_params, points.shape[0], **tensor_kwargs)
             objective, max_residual = _evaluate_qcqp_points(
                 problem,
                 input_batch,
@@ -103,14 +74,6 @@ def _evaluate_qcqp_grid(problem, input_params, points_np, *, objective_params=No
             objective_np[start:end] = objective.detach().cpu().numpy()
             residual_np[start:end] = max_residual.detach().cpu().numpy()
     return objective_np, residual_np
-
-
-def _grid_points_from_bounds(low, high, grid_size):
-    x_grid = np.linspace(low[0], high[0], int(grid_size))
-    y_grid = np.linspace(low[1], high[1], int(grid_size))
-    X, Y = np.meshgrid(x_grid, y_grid)
-    points_np = np.column_stack([X.reshape(-1), Y.reshape(-1)])
-    return X, Y, points_np
 
 
 def _compute_qcqp_landscape(
@@ -123,7 +86,7 @@ def _compute_qcqp_landscape(
     eval_batch_size=None,
 ):
     low, high = _trajectory_bounds(problem, traj)
-    X, Y, points_np = _grid_points_from_bounds(low, high, grid_size)
+    X, Y, points_np = grid_points_from_bounds(low, high, grid_size)
     objective_np, residual_np = _evaluate_qcqp_grid(
         problem,
         input_params,
@@ -150,11 +113,11 @@ def _evaluate_latent_qcqp_grid(
 ):
     objective_np = np.empty(z_points.shape[0], dtype=float)
     residual_np = np.empty(z_points.shape[0], dtype=float)
-    tensor_kwargs = _problem_tensor_kwargs(problem)
+    tensor_kwargs = problem_tensor_kwargs(problem)
     with torch.no_grad():
-        for start, end in _iter_point_batches(z_points.shape[0], batch_size):
+        for start, end in iter_point_batches(z_points.shape[0], batch_size):
             z_tensor = torch.as_tensor(z_points[start:end], **tensor_kwargs)
-            input_batch = _expand_input_params(input_params, z_tensor.shape[0], **tensor_kwargs)
+            input_batch = expand_input_params(input_params, z_tensor.shape[0], **tensor_kwargs)
             if input_batch is None:
                 return None, None
             x_points = model(z_tensor, input_batch)

@@ -170,16 +170,7 @@ class QCOpt(TensorRuntimeMixin):
             else:
                 violation = (self.constraint_x(x_detached, clip=clip) * dual_var).sum(-1)
             grad = torch.autograd.grad(violation, x_detached, create_graph=False)[0]
-        elif method == 'finite_diff':
-            epsilon = 1e-6
-            grad = torch.zeros_like(x)
-            for i in range(x.shape[1]): # iterate over each variable
-                delta = torch.zeros_like(x)
-                delta[:, i] = epsilon
-                obj_plus = self.constraint_x(x + delta, clip=clip)
-                obj_minus = self.constraint_x(x - delta, clip=clip)
-                grad[:, i] = (obj_plus - obj_minus).sum(-1) / (2 * epsilon)
-        else:
+        elif method == 'explicit':
             grad = self._constraint_jacobian_x(x)
             if clip:
                 active = (self.constraint_x(x, clip=False) > 0).to(dtype=x.dtype).unsqueeze(-1)
@@ -188,6 +179,8 @@ class QCOpt(TensorRuntimeMixin):
                 grad = grad.sum(1)
             else:
                 grad = (grad * dual_var.unsqueeze(-1)).sum(1)
+        else:
+            raise ValueError(f"Unsupported QCOpt constraint gradient method: {method}")
         return grad
 
     def gradient_lagrangian_x(
@@ -233,7 +226,7 @@ class QCOpt(TensorRuntimeMixin):
         x = hom_map.forward(z, method=hom_map_method)
         return self.objective_x(x)
 
-    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd"):
+    def gradient_objective_z(self, z, hom_map=None, method="autograd", hom_map_method="autograd", x=None, hom_state=None):
         """Compute gradient of objective function with respect to z using chain rule
         Args:
             z: input points in unit ball (1 x n)
@@ -245,56 +238,14 @@ class QCOpt(TensorRuntimeMixin):
             z_detached = z.detach().requires_grad_(True)
             obj = self.objective_z(z_detached, hom_map, hom_map_method=hom_map_method)
             grad_z = torch.autograd.grad(obj, z_detached, create_graph=False)[0]
-        elif method == 'zeroorder':
-            epsilon = 1e-6
-            delta = torch.rand_like(z)
-            delta = delta / torch.norm(delta, dim=1, keepdim=True)
-            obj_plus = self.objective_z(z + epsilon * delta, hom_map)
-            obj_minus = self.objective_z(z - epsilon * delta, hom_map)
-            grad_z = (obj_plus - obj_minus) / (2 * epsilon) * delta
-        elif method == 'finite_diff':
-            epsilon = 1e-6
-            batch_size, dim = z.shape
-
-            # Create a perturbation tensor based on the identity matrix:
-            #   - eye has shape (dim, dim)
-            #   - multiplying it by epsilon gives the per-coordinate perturbation.
-            #   - unsqueeze and expand to shape (batch_size, dim, dim) so that each sample gets its own copy.
-            eye = torch.eye(dim, device=z.device, dtype=z.dtype)
-            perturb = epsilon * eye.unsqueeze(0).expand(batch_size, -1, -1)
-
-            # Expand z to match the perturb tensor shape. z_expanded has shape (batch_size, 1, dim)
-            # and will be broadcast to (batch_size, dim, dim)
-            z_expanded = z.unsqueeze(1)
-
-            # Generate the perturbed inputs for plus and minus directions.
-            # Each sample now has `dim` perturbations, one for each coordinate, resulting in shape (batch_size, dim, dim)
-            z_plus = z_expanded + perturb
-            z_minus = z_expanded - perturb
-
-            # Flatten the first two dimensions from (batch_size, dim, dim) to (batch_size * dim, dim)
-            z_plus_flat = z_plus.reshape(-1, dim)
-            z_minus_flat = z_minus.reshape(-1, dim)
-
-            # Compute the objective function for all perturbed inputs in one batch call.
-            # It is assumed that `self.objective_z` returns a tensor of shape (batch_size * dim,) or (batch_size * dim, 1)
-            obj_plus = self.objective_z(z_plus_flat, hom_map)
-            obj_minus = self.objective_z(z_minus_flat, hom_map)
-
-            # If necessary, squeeze the last dimension to ensure the shape is (batch_size * dim,)
-            if obj_plus.dim() > 1:
-                obj_plus = obj_plus.squeeze(-1)
-            if obj_minus.dim() > 1:
-                obj_minus = obj_minus.squeeze(-1)
-
-            # Reshape the results back to (batch_size, dim)
-            obj_plus = obj_plus.reshape(batch_size, dim)
-            obj_minus = obj_minus.reshape(batch_size, dim)
-
-            # Compute the finite-difference numerical gradient in a vectorized manner.
-            grad_z = (obj_plus - obj_minus) / (2 * epsilon)
+        elif method == 'explicit':
+            if hom_map is None:
+                raise ValueError("hom_map is required for explicit QCOpt z-space objective gradient.")
+            if x is None:
+                x, hom_state = hom_map.forward(z, method=hom_map_method, return_state=True)
+            grad_z = hom_map.vjp(z, self.gradient_objective_x(x), method=hom_map_method, state=hom_state)
         else:
-            raise NotImplementedError
+            raise ValueError(f"Unsupported QCOpt z-objective gradient method: {method}")
         return grad_z
 
 __all__ = ["QCOpt"]

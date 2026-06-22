@@ -10,7 +10,7 @@ from .common import _merged, _norm_label, _rebase_artifacts, _save_json
 from .config import _apply_auto_eps
 from .data import get_model_checkpoint
 from .workflow import adversarial_attack_workflow
-from homopt.utils import ensure_dir
+from homopt.experiments.common.io import ensure_dir
 
 
 def _print_attack_config(attack_cfg, auto_eps_applied):

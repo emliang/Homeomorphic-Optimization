@@ -7,14 +7,14 @@ import warnings
 
 import numpy as np
 
-from homopt.experiments.common.artifacts import (
+from homopt.records.artifacts import (
     artifact_ref,
     build_benchmark_payload,
     build_visualize_only_benchmark_payload,
-    load_incremental_comparison_artifacts,
+    load_visualize_only_comparison_artifacts,
     save_incremental_comparison_artifacts,
 )
-from homopt.experiments.common.benchmark import (
+from homopt.experiments.common.reports import (
     constraint_violation_summary,
     convex_solution_diagnostics,
     make_single_instance_solver_row,
@@ -87,16 +87,16 @@ def _algorithm_config(params):
 
 
 def _outer_config(params):
-    common = normalize_single_common_config(common_config=params.get("common_config"))
+    common = normalize_single_common_config(common_config=params["common_config"])
     outer_defaults = {
-        "learning_rate": common.get("learning_rate", 1e-3),
-        "outer_stepsize_rule": common.get("stepsize_rule", "adaptive"),
-        "outer_lr_decay": common.get("lr_decay", 0.999),
-        "min_lr": common.get("min_lr", 1e-6),
+        "learning_rate": common["learning_rate"],
+        "outer_stepsize_rule": common["stepsize_rule"],
+        "outer_lr_decay": common["lr_decay"],
+        "min_lr": common["min_lr"],
     }
     outer_common = align_outer_iterations_with_max_iterations(
-        params.get("outer_common"),
-        max_iterations=params.get("max_iterations"),
+        params["outer_common"],
+        max_iterations=params["max_iterations"],
     )
     outer, _ = normalize_alm_common_config_groups(
         outer_common=outer_common,
@@ -108,8 +108,8 @@ def _outer_config(params):
 def _inner_config(params):
     _, inner = normalize_alm_common_config_groups(
         outer_common=align_outer_iterations_with_max_iterations(
-            params.get("outer_common"),
-            max_iterations=params.get("max_iterations"),
+            params["outer_common"],
+            max_iterations=params["max_iterations"],
         ),
         inner_solver_common=params["inner_solver_common"],
     )
@@ -151,8 +151,8 @@ def _build_alm_params(params):
         "outer_stepsize_rule": outer["outer_stepsize_rule"],
         "outer_lr_decay": outer["outer_lr_decay"],
         "min_lr": outer["min_lr"],
-        "inner_lr_decay": inner.get("inner_lr_decay", inner.get("lr_decay", 0.999)),
-        "inner_min_lr": inner.get("inner_min_lr", inner.get("min_lr", 1e-6)),
+        "inner_lr_decay": inner["inner_lr_decay"],
+        "inner_min_lr": inner["inner_min_lr"],
         "dual_learning_rate": outer["dual_learning_rate"],
         "penalty_coef": outer["penalty_coef"],
         "penalty_growth": outer["penalty_growth"],
@@ -217,10 +217,10 @@ def _build_alm_params(params):
 
 def _effective_stiefel_inner_iterations(params):
     inner = _inner_config(params)
-    rule = str(inner.get("inner_stopping_rule", "fixed")).lower()
+    rule = str(inner["inner_stopping_rule"]).lower()
     if rule == "adaptive":
-        return int(inner.get("inner_iterations_max", inner.get("inner_iterations", 1)))
-    return int(inner.get("inner_iterations", 1))
+        return int(inner["inner_iterations_max"])
+    return int(inner["inner_iterations"])
 
 
 def _stiefel_nested_solver_base_params(params):
@@ -233,8 +233,8 @@ def _stiefel_nested_solver_base_params(params):
         "convergence_threshold": outer["convergence_threshold"],
         "learning_rate": outer["learning_rate"],
         "stepsize_rule": inner["inner_stepsize_rule"],
-        "lr_decay": inner.get("inner_lr_decay", inner.get("lr_decay", 0.999)),
-        "min_lr": inner.get("inner_min_lr", inner.get("min_lr", 1e-6)),
+        "lr_decay": inner["inner_lr_decay"],
+        "min_lr": inner["inner_min_lr"],
         "dual_learning_rate": outer["dual_learning_rate"],
         "penalty_coef": outer["penalty_coef"],
         "penalty_growth": outer["penalty_growth"],
@@ -255,8 +255,8 @@ def _stiefel_penalty_solver_base_params(params):
         "convergence_threshold": outer["convergence_threshold"],
         "learning_rate": outer["learning_rate"],
         "stepsize_rule": inner["inner_stepsize_rule"],
-        "lr_decay": inner.get("inner_lr_decay", inner.get("lr_decay", 0.999)),
-        "min_lr": inner.get("inner_min_lr", inner.get("min_lr", 1e-6)),
+        "lr_decay": inner["inner_lr_decay"],
+        "min_lr": inner["inner_min_lr"],
         "penalty_coef": outer["penalty_coef"],
         "penalty_growth": outer["penalty_growth"],
         "max_penalty": outer["max_penalty"],
@@ -439,25 +439,26 @@ def stiefel_algorithm_comparison(
     if bool(params.get("visualize", True)) and bool(params.get("visualize_only", False)):
         problem, _, _ = build_stiefel_problem(params)
         requested_record_algorithms = algorithms or None
-        records, summaries, previous_result, manifest = load_incremental_comparison_artifacts(
+        visual_state = load_visualize_only_comparison_artifacts(
             output_dir,
             algorithms=requested_record_algorithms,
         )
-        previous_metrics = dict(previous_result.get("metrics", {}) or {})
-        previous_artifacts = dict(previous_result.get("artifacts", {}) or {})
-        previous_algorithms = list(records.keys()) or list(manifest.get("algorithms") or algorithms)
-        reference_objective = previous_metrics.get("reference_objective")
-        artifacts = {
-            **previous_artifacts,
-            **_plot_stiefel_records(
+        records = visual_state["records"]
+        summaries = visual_state["summaries"]
+        previous_result = visual_state["previous_result"]
+        previous_algorithms = visual_state["stored_algorithms"]
+        reference_objective = visual_state["metrics"].get("reference_objective")
+        artifacts = visual_state["artifacts"]
+        artifacts.update(
+            _plot_stiefel_records(
                 problem,
                 records,
                 previous_algorithms,
                 output_dir,
                 params,
                 reference_objective=reference_objective,
-            ),
-        }
+            )
+        )
         return build_visualize_only_benchmark_payload(
             previous_result=previous_result,
             summaries=summaries,

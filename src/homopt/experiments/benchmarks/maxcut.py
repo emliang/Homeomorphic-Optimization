@@ -5,20 +5,20 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from homopt.experiments.common.artifacts import (
+from homopt.records.artifacts import (
     build_benchmark_payload,
     build_visualize_only_benchmark_payload,
-    load_incremental_comparison_artifacts,
+    load_visualize_only_comparison_artifacts,
     save_incremental_comparison_artifacts,
 )
-from homopt.experiments.common.benchmark import ensure_record_violation_split, summarize_run_record
 from homopt.experiments.common.config import (
     apply_config_groups,
     enforce_alm_outer_iteration_budget,
     normalize_single_common_config,
     reject_algorithm_iteration_budget_keys,
 )
-from homopt.experiments.common.method_specs import build_first_order_method_params, build_penalty_method_params
+from homopt.experiments.method_specs import build_first_order_method_params, build_penalty_method_params
+from homopt.experiments.common.run_records import ensure_record_violation_split, summarize_run_record
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.mappings import GaugeMapMaxCut
 from homopt.optim import run_algorithm
@@ -130,12 +130,15 @@ def maxcut_algorithm_comparison(
     hom_map = cast_tensors_to_dtype(hom_map, runtime_dtype)
 
     if visualize_only:
-        records, summaries, previous_result, manifest = load_incremental_comparison_artifacts(
+        visual_state = load_visualize_only_comparison_artifacts(
             output_dir,
             algorithms=algorithms,
         )
-        artifacts = dict(previous_result.get("artifacts", {}) or {})
-        stored_algorithms = list(records.keys()) or list(manifest.get("algorithms") or algorithms)
+        records = visual_state["records"]
+        summaries = visual_state["summaries"]
+        previous_result = visual_state["previous_result"]
+        artifacts = visual_state["artifacts"]
+        stored_algorithms = visual_state["stored_algorithms"]
         if visualize and output_dir is not None:
             artifacts.update(
                 save_comparison_visualizations(

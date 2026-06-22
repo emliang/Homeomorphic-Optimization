@@ -8,13 +8,13 @@ from pathlib import Path
 import numpy as np
 
 from .artifacts import relative_artifacts, save_figure
+from .convergence import save_metric_convergence_bundle
 from .landscapes import convex_landscape_grid, convex_z_landscape_grid, plot_bounds
 from .primitives import (
     draw_constraint_notation,
     draw_convex_landscape,
     draw_convex_z_landscape,
     draw_trajectory,
-    plot_metric_convergence,
 )
 from .style import (
     ALGORITHM_COLORS,
@@ -182,49 +182,20 @@ def save_convex_2d_visualizations(
         "metric_traces": artifact_dir / f"{prefix}_metric_traces.json",
     }
     ref_obj = reference_objective_from_payload(payload or {})
-    objective_paths = plot_metric_convergence(
-        traces,
-        "objective",
-        "Objective value",
-        artifact_dir / f"{prefix}_objective_convergence.pdf",
-        reference_value=ref_obj,
-        reference_label=reference_label,
-        method_labels=method_labels,
-    )
-    paths.update({f"objective_convergence_{name}": metric_path for name, metric_path in objective_paths.items()})
     if include_equality_convergence is None:
         include_equality_convergence = problem_has_equalities(problem)
-    if include_equality_convergence:
-        equality_paths = plot_metric_convergence(
+    paths.update(
+        save_metric_convergence_bundle(
             traces,
-            "equality_violation",
-            "Equality violation",
-            artifact_dir / f"{prefix}_equality_violation_convergence.pdf",
-            log_y=True,
+            artifact_dir,
+            prefix,
+            reference_objective=ref_obj,
+            reference_label=reference_label,
             method_labels=method_labels,
-            y_min_clip=violation_y_min,
+            violation_y_min=violation_y_min,
+            include_equality=include_equality_convergence,
         )
-        paths.update({f"equality_violation_convergence_{name}": metric_path for name, metric_path in equality_paths.items()})
-    inequality_paths = plot_metric_convergence(
-        traces,
-        "inequality_violation",
-        "Inequality violation",
-        artifact_dir / f"{prefix}_inequality_violation_convergence.pdf",
-        log_y=True,
-        method_labels=method_labels,
-        y_min_clip=violation_y_min,
     )
-    paths.update({f"inequality_violation_convergence_{name}": metric_path for name, metric_path in inequality_paths.items()})
-    full_paths = plot_metric_convergence(
-        traces,
-        "full_violation",
-        "Full violation",
-        artifact_dir / f"{prefix}_full_violation_convergence.pdf",
-        log_y=True,
-        method_labels=method_labels,
-        y_min_clip=violation_y_min,
-    )
-    paths.update({f"full_violation_convergence_{name}": metric_path for name, metric_path in full_paths.items()})
     legend_path = plot_trajectory_legend(traces, paths["trajectory_legend"], method_labels=method_labels)
     if legend_path is None:
         del paths["trajectory_legend"]
