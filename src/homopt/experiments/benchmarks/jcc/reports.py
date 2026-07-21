@@ -31,7 +31,10 @@ def build_jcc_method_row(problem, *, route, method, objective, x_opt, runtime_to
         feasible = False
     else:
         device = getattr(problem, "device", None)
-        x_tensor = torch.as_tensor(x_opt, dtype=torch.float32, device=device).view(1, -1)
+        dtype = getattr(problem, "dtype", None)
+        if dtype is None:
+            dtype = getattr(getattr(problem, "P_min", None), "dtype", torch.float32)
+        x_tensor = torch.as_tensor(x_opt, dtype=dtype, device=device).view(1, -1)
         chance_feasibility_rate = float(problem.compute_scenario_feasibility(x_tensor).mean().item())
         violation = max(0.0, (1.0 - chance_feasibility_rate) - float(problem.config["epsilon"]))
         feasible = violation <= 1e-12

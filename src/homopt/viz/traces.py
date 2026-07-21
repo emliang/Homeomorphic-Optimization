@@ -23,7 +23,20 @@ def record_trajectory(record, *, key="x_traj", fallback_key="x_solved", decision
 
 
 def record_time_axis(record, n_values):
-    per_iter = np.asarray(record.get("iter_time", []), dtype=float).reshape(-1)
+    """Build a metric-aligned cumulative time axis from an explicit step trace.
+
+    Solver result records keep iterative diagnostics under ``extras``.  Scalar
+    metric extraction already supports that layout, so timing must resolve the
+    matching nested ``iter_time`` trace as well.  We deliberately do not infer
+    a trace from total runtime: a supplied trace still has to contain one value
+    per transition (or one value per metric sample).
+    """
+
+    extras = record.get("extras", {}) or {}
+    iter_time = record.get("iter_time")
+    if iter_time is None:
+        iter_time = extras.get("iter_time", [])
+    per_iter = np.asarray(iter_time, dtype=float).reshape(-1)
     if per_iter.size == n_values - 1:
         return np.concatenate([[0.0], np.cumsum(per_iter)])
     if per_iter.size == n_values:

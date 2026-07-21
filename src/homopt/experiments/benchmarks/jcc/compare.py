@@ -256,6 +256,7 @@ def jcc_algorithm_comparison(
         seed=problem_cfg["seed"],
         runtime_device=runtime_device,
         runtime_dtype=runtime_dtype,
+        problem_config=problem_cfg,
     )
     midpoint = ((problem.P_min + problem.P_max) / 2).view(1, -1)
     results = {}

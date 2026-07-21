@@ -10,7 +10,12 @@ import torch
 
 @dataclass(frozen=True)
 class BisectionConfig:
-    """Configuration for batched segment bisection in an arbitrary coordinate space."""
+    """Configuration for batched segment bisection in an arbitrary coordinate space.
+
+    ``final_alpha="lower"`` returns the retained feasible endpoint.  A
+    ``"midpoint"`` is only a bracket estimate and can be infeasible; consult
+    :attr:`BisectionResult.feasible_mask` before using it as a projection.
+    """
 
     max_steps: int = 30
     feasibility_tol: float = 1e-5
@@ -117,7 +122,8 @@ def bisect_segment(
         selected = selected_anchor_idx.view(batch_size, 1, 1).expand(-1, 1, coord_dim)
         point = torch.gather(coordinate, 1, selected).view(batch_size, coord_dim)
         selected_anchor = torch.gather(anchor, 1, selected).view(batch_size, coord_dim)
-        selected_mask = torch.gather(alpha_lower > 0, 1, selected_anchor_idx).view(batch_size, 1)
+        selected_violation = _as_column(violation(decode_to_y(point)))
+        selected_mask = torch.isfinite(selected_violation) & (selected_violation <= config.feasibility_tol)
 
     return BisectionResult(point=point, anchor=selected_anchor, steps=steps_done, feasible_mask=selected_mask)
 

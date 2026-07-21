@@ -30,6 +30,7 @@ def draw_metric_convergence(
     method_labels=None,
     y_min_clip=None,
     show_legend=True,
+    show_variants=(),
 ):
     """Draw separate iteration/time convergence figures for one scalar metric."""
 
@@ -48,6 +49,14 @@ def draw_metric_convergence(
         "time": path.with_name(f"{path.stem}_by_time{path.suffix}"),
         "time_logx": path.with_name(f"{path.stem}_by_time_logx{path.suffix}"),
     }
+    show_variants = set(show_variants)
+    unknown_show_variants = show_variants.difference(output_paths)
+    if unknown_show_variants:
+        raise ValueError(
+            "show_variants must contain only: "
+            + ", ".join(sorted(output_paths))
+            + f"; received {sorted(unknown_show_variants)}."
+        )
 
     def _log_time_floor():
         positive = [
@@ -60,7 +69,7 @@ def draw_metric_convergence(
             return 1e-12
         return max(min(positive) * 0.1, 1e-12)
 
-    def _draw_panel(x_key, xlabel, output_path, *, log_x=False):
+    def _draw_panel(x_key, xlabel, output_path, *, log_x=False, variant):
         fig, ax = plt.subplots(1, 1, figsize=PAPER_STYLE["convergence_figsize"])
         log_time_floor = _log_time_floor() if log_x and x_key == "time" else None
         for method, trace in traces.items():
@@ -129,12 +138,14 @@ def draw_metric_convergence(
         set_axis_labels(ax, xlabel, ylabel)
         fig.tight_layout()
         save_figure(fig, output_path)
+        if variant in show_variants:
+            plt.show()
         plt.close(fig)
 
-    _draw_panel("iteration", "Iteration", output_paths["iteration"])
-    _draw_panel("time", "Running time (s)", output_paths["time"])
-    _draw_panel("iteration", "Iteration", output_paths["iteration_logx"], log_x=True)
-    _draw_panel("time", "Running time (s)", output_paths["time_logx"], log_x=True)
+    _draw_panel("iteration", "Iteration", output_paths["iteration"], variant="iteration")
+    _draw_panel("time", "Running time (s)", output_paths["time"], variant="time")
+    _draw_panel("iteration", "Iteration", output_paths["iteration_logx"], log_x=True, variant="iteration_logx")
+    _draw_panel("time", "Running time (s)", output_paths["time_logx"], log_x=True, variant="time_logx")
     return output_paths
 
 

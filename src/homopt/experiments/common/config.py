@@ -98,6 +98,56 @@ ALM_CVXPY_CONFIG_KEYS = {
     "subproblem_time_limit_sec",
     "solver_verbose",
 }
+
+# These controls are meaningful only for the exact-subproblem equality
+# baselines.  ``outer_common`` may contain the union of method-family controls,
+# but direct iterative overrides must not accept and then discard them.
+ALM_CVXPY_ONLY_CONFIG_KEYS = {
+    "check_outer_objective_change",
+    "outer_objective_change_threshold",
+    "min_outer_iterations",
+    "solver_options",
+    "subproblem_time_limit_sec",
+    "solver_verbose",
+}
+
+# These public aliases describe first-order step schedules.  They are useful
+# in a shared algorithm-config payload, but exact CVXPY subproblems do not
+# perform a primal gradient update.  Drop only these known no-op aliases after
+# public-key normalization; all other unsupported explicit keys still fail.
+ALM_CVXPY_IGNORED_PUBLIC_SCHEDULE_KEYS = {
+    "outer_lr_decay",
+    "outer_stepsize_rule",
+}
+
+
+def _outer_common_for_alm_algorithm(algorithm_name, outer_common):
+    """Route shared outer controls to the ALM variants that support them.
+
+    ``outer_common`` deliberately covers the union of iterative and exact
+    equality-baseline controls.  Gradient-inner-loop controls such as
+    ``first_order_lagrangian_gap_threshold`` therefore remain available to
+    iterative methods but must not leak into the CVXPY-backed ``*-EQ``
+    variants.  Direct per-algorithm overrides are validated separately by
+    :func:`normalize_alm_algorithm_config`; its only intentional no-op filter
+    is the documented public schedule aliases for exact baselines.
+    """
+
+    if algorithm_name in ALM_ITERATIVE_ALGORITHMS:
+        return {
+            key: copy.deepcopy(value)
+            for key, value in outer_common.items()
+            if key not in ALM_CVXPY_ONLY_CONFIG_KEYS
+        }
+    if algorithm_name in ALM_CVXPY_ALGORITHMS:
+        return {
+            key: copy.deepcopy(value)
+            for key, value in outer_common.items()
+            if key in ALM_CVXPY_CONFIG_KEYS
+        }
+    return copy.deepcopy(outer_common)
+
+
 def _normalize_alm_public_algorithm_config(config, *, context):
     normalized = copy.deepcopy(config)
     _reject_config_keys(
@@ -120,19 +170,33 @@ def normalize_alm_algorithm_config(algorithm_name, config, *, outer_config_norma
         return config
     normalized_outer = copy.deepcopy(config) if outer_config_normalized else None
     if algorithm_name in ALM_ITERATIVE_ALGORITHMS:
-        return normalized_outer or _normalize_alm_public_algorithm_config(
+        normalized = normalized_outer or _normalize_alm_public_algorithm_config(
             config,
             context=f"{algorithm_name} config",
         )
+        if not outer_config_normalized:
+            unsupported = sorted(set(normalized).intersection(ALM_CVXPY_ONLY_CONFIG_KEYS))
+            if unsupported:
+                raise ValueError(
+                    f"Unsupported {algorithm_name} config keys: {unsupported}. "
+                    "These controls apply only to the CVXPY-backed *-EQ baselines."
+                )
+        return normalized
     if algorithm_name in ALM_CVXPY_ALGORITHMS:
         normalized = normalized_outer or _normalize_alm_public_algorithm_config(
             config,
             context=f"{algorithm_name} config",
         )
-        unknown_keys = sorted(set(normalized) - ALM_CVXPY_CONFIG_KEYS)
+        unknown_keys = sorted(
+            set(normalized) - ALM_CVXPY_CONFIG_KEYS - ALM_CVXPY_IGNORED_PUBLIC_SCHEDULE_KEYS
+        )
         if unknown_keys:
             raise ValueError(f"Unsupported {algorithm_name} config keys: {unknown_keys}")
-        return normalized
+        return {
+            key: value
+            for key, value in normalized.items()
+            if key in ALM_CVXPY_CONFIG_KEYS
+        }
     return config
 
 
@@ -144,9 +208,10 @@ def merge_alm_outer_common(params, outer_common):
     normalized_outer = normalize_outer_common_config(outer_common)
     for name in ALM_FAMILY_ALGORITHMS:
         if name in params and isinstance(params[name], dict):
+            supported_outer = _outer_common_for_alm_algorithm(name, normalized_outer)
             params[name] = merged(
                 params[name],
-                normalize_alm_algorithm_config(name, normalized_outer, outer_config_normalized=True),
+                normalize_alm_algorithm_config(name, supported_outer, outer_config_normalized=True),
             )
     return params
 
@@ -281,7 +346,11 @@ def apply_config_groups(
             raise ValueError(f"Unknown algorithm_config entries: {unknown_algorithms}")
         for name, config in algorithm_config.items():
             if name in params and isinstance(params[name], dict):
-                params[name] = merged(params[name], normalize_alm_algorithm_config(name, config))
+                # PGD/FW expose nested projection/oracle subproblem controls.
+                # Preserve the canonical subproblem defaults when applying a
+                # public iteration override instead of replacing that nested
+                # configuration wholesale.
+                params[name] = deep_merged(params[name], normalize_alm_algorithm_config(name, config))
     return params
 
 
@@ -416,12 +485,25 @@ def normalize_jcc_problem_config(
     seed,
     problem_config=None,
 ):
-    supported_keys = {"n_scenarios", "epsilon", "demand_std", "seed"}
+    supported_keys = {
+        "n_scenarios",
+        "epsilon",
+        "demand_std",
+        "seed",
+        "pglib_case_name",
+        "pglib_data_dir",
+        "download_if_missing",
+    }
     problem_cfg = {
         "n_scenarios": int(n_scenarios),
         "epsilon": float(epsilon),
         "demand_std": float(demand_std),
         "seed": int(seed),
+        # Keep PGLib input controls in the canonical JCC config.  They affect
+        # the actual optimization instance and must reach the problem loader.
+        "pglib_case_name": None,
+        "pglib_data_dir": None,
+        "download_if_missing": True,
     }
     if problem_config:
         overrides = dict(problem_config)
@@ -433,6 +515,11 @@ def normalize_jcc_problem_config(
     problem_cfg["seed"] = int(problem_cfg["seed"])
     problem_cfg["epsilon"] = float(problem_cfg["epsilon"])
     problem_cfg["demand_std"] = float(problem_cfg["demand_std"])
+    case_name = problem_cfg.get("pglib_case_name")
+    data_dir = problem_cfg.get("pglib_data_dir")
+    problem_cfg["pglib_case_name"] = None if case_name is None else str(case_name)
+    problem_cfg["pglib_data_dir"] = None if data_dir is None else str(data_dir)
+    problem_cfg["download_if_missing"] = bool(problem_cfg["download_if_missing"])
     return problem_cfg
 
 

@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+import numbers
+
 import numpy as np
 import torch
 
 
 def _project_to_ball(z, p_norm):
-    if p_norm == 2:
-        norms = torch.norm(z, dim=-1, p=2, keepdim=True)
-        safe_norms = torch.clamp(norms, min=1.0)
-        return torch.where(norms > 1, z / safe_norms, z)
+    """Return a point in the unit p-norm ball by radial rescaling.
+
+    The infinity-norm case retains coordinate clipping, which is its Euclidean
+    projection.  For every finite valid p, radial normalization is sufficient to
+    enforce the latent-ball invariant used by the homeomorphic optimizers.
+    """
+
+    if isinstance(p_norm, (bool, np.bool_)) or not isinstance(p_norm, numbers.Real):
+        raise ValueError("p_norm must be a real number in [1, inf].")
+    p_norm = float(p_norm)
+    if np.isnan(p_norm) or p_norm < 1 or p_norm == -np.inf:
+        raise ValueError("p_norm must be a real number in [1, inf].")
     if p_norm == np.inf:
         return torch.clamp(z, min=-1, max=1)
-    return z
+    norms = torch.norm(z, dim=-1, p=p_norm, keepdim=True)
+    return z / torch.clamp(norms, min=1.0)
 
 
 def _as_numpy_vector(x):

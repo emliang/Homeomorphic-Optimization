@@ -129,7 +129,11 @@ class _JCCINNPGDAdapter:
         self.npara = self.n_bus
         self.n_qua = self.n_scenarios
         self.device = getattr(problem, "device", torch.device("cpu"))
-        self.dtype = torch.float32
+        # The mapping, latent coordinates, and sampled scenarios must follow
+        # the runtime dtype selected for the underlying JCC problem.
+        self.dtype = getattr(problem, "dtype", None)
+        if self.dtype is None:
+            self.dtype = getattr(getattr(problem, "P_min", None), "dtype", torch.float32)
         self._sample_counter = 0
 
     def to_device(self, device):
@@ -230,7 +234,7 @@ def _jcc_inn_initial_latent(adapter, input_params, *, mode="center", radius=1.0,
     if mode == "sphere_boundary_random":
         generator = torch.Generator(device="cpu")
         generator.manual_seed(int(seed))
-        directions = torch.randn(batch_size, adapter.nvar, generator=generator, dtype=torch.float32)
+        directions = torch.randn(batch_size, adapter.nvar, generator=generator, dtype=adapter.dtype)
         directions = directions / directions.norm(dim=1, keepdim=True).clamp_min(1e-12)
         return (float(radius) * directions).to(device=adapter.device, dtype=adapter.dtype)
     raise ValueError(
@@ -273,6 +277,8 @@ def _run_jcc_inn_pgd_variant(
         "problem_family": "jcc_opf",
         "n_bus": int(adapter.n_bus),
         "n_scenarios": int(adapter.n_scenarios),
+        "pglib_case_name": problem.config.get("pglib_case_name"),
+        "pglib_data_dir": problem.config.get("pglib_data_dir"),
     }
     training_resource = prepare_learning_mapping(
         "inn",

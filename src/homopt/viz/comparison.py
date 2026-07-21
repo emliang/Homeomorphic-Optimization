@@ -182,7 +182,7 @@ def _runtime_metric_error(record, runtime_metric):
     return 0.0
 
 
-def plot_runtime_summary(records, algorithms, path, *, method_labels=None, runtime_metric="total_runtime"):
+def plot_runtime_summary(records, algorithms, path, *, method_labels=None, runtime_metric="total_runtime", show=False):
     plt = require_matplotlib()
     labels = [method for method in algorithms if method in records]
     if not labels:
@@ -208,6 +208,8 @@ def plot_runtime_summary(records, algorithms, path, *, method_labels=None, runti
     apply_paper_axis_style(ax)
     fig.tight_layout()
     save_figure(fig, path)
+    if show:
+        plt.show()
     plt.close(fig)
     return path
 

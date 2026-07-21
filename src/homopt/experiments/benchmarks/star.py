@@ -314,63 +314,29 @@ def _toy_reference_solution(
     raise ValueError("reference_solver must be 'auto', 'none', 'convex', 'ipopt', or 'grid'.")
 
 
-def poly_star_benchmark(
-    algorithms=None,
-    common_config=None,
-    algorithm_config=None,
+def build_poly_star_toy_context(
+    *,
     alpha=0.3,
     num_star=4,
     problem_type="star",
     poly_config=None,
-    max_iterations=25,
-    max_running_time=5,
-    learning_rate=1e-2,
-    stepsize_rule="constant",
-    lr_decay=0.999,
-    min_lr=1e-6,
     seed=2025,
-    output_dir=None,
     device=None,
     dtype=None,
-    visualize=True,
-    visualize_only=False,
-    show_constraint_notation=False,
-    reference_solver="auto",
-    reference_label=None,
-    reference_grid_size=801,
-    reference_ipopt_solver=PYOMO_NLP_SOLVER,
-    reference_ipopt_options=None,
-    reference_ipopt_num_starts=16,
+    hom_p_norm=2,
 ):
-    """Small package-native toy benchmark for polytope, star, or intersection sets."""
+    """Construct a two-dimensional toy problem and its matching homeomorphic map.
+
+    This is the shared construction boundary for runnable toy benchmarks and
+    tutorials.  It intentionally does not choose or run a reference solver.
+    """
 
     set_global_seed(seed)
     runtime_device, runtime_dtype = resolve_runtime(device, dtype, default_device="cpu")
-    reject_algorithm_iteration_budget_keys(algorithm_config, context="algorithm_config")
     problem_type = str(problem_type).lower()
     if problem_type not in {"poly", "star", "poly_star"}:
         raise ValueError("problem_type must be 'poly', 'star', or 'poly_star'")
-    algorithms = list(algorithms or ["Hom-PGD"])
-    effective_common_config = normalize_single_common_config(
-        common_config=common_config,
-    )
-    params = _ineq_algorithm_params(
-        seed,
-        max_iterations,
-        max_running_time,
-        learning_rate,
-        stepsize_rule,
-        lr_decay,
-        min_lr,
-        common_config=effective_common_config,
-    )
-    params = apply_config_groups(
-        params,
-        algorithm_config=algorithm_config,
-    )
-    effective_max_iterations = int(params["common"]["max_iterations"])
-    params = enforce_alm_outer_iteration_budget(params, max_iterations=effective_max_iterations)
-    hom_p_norm = params.get("Hom-PGD", {}).get("hom_p_norm", 2)
+
     if problem_type == "star":
         problem = cast_tensors_to_dtype(
             ToyStarOpt(alpha=alpha, num_star=num_star).to_device(runtime_device),
@@ -418,8 +384,23 @@ def poly_star_benchmark(
             GaugeMap(problem, p_norm=hom_p_norm, x_origin=x_origin).to_device(runtime_device),
             runtime_dtype,
         )
+    return problem, hom_map
 
-    reference = _toy_reference_solution(
+
+def solve_poly_star_toy_reference(
+    problem_type,
+    problem,
+    *,
+    reference_solver="auto",
+    reference_label=None,
+    reference_grid_size=801,
+    reference_ipopt_solver=PYOMO_NLP_SOLVER,
+    reference_ipopt_options=None,
+    reference_ipopt_num_starts=16,
+):
+    """Solve one toy instance with the explicitly requested reference method."""
+
+    return _toy_reference_solution(
         problem_type,
         problem,
         reference_solver=reference_solver,
@@ -428,6 +409,110 @@ def poly_star_benchmark(
         ipopt_solver=reference_ipopt_solver,
         ipopt_options=reference_ipopt_options,
         ipopt_num_starts=reference_ipopt_num_starts,
+    )
+
+
+def _resolve_toy_initial_point(problem, hom_map, mode, *, seed):
+    """Build one shared decision-space start for a toy comparison."""
+
+    normalized = str(mode or "gauge_center").lower()
+    if normalized == "gauge_center":
+        return hom_map.center.detach().cpu().numpy()
+    if normalized == "random":
+        rng = np.random.default_rng(seed)
+        direction = rng.standard_normal(int(problem.nvar))
+        direction /= max(float(np.linalg.norm(direction)), 1e-12)
+        z = torch.as_tensor(
+            (0.2 + 0.6 * float(rng.random())) * direction.reshape(1, -1),
+            dtype=_toy_problem_tensor_dtype(problem),
+            device=problem.device,
+        )
+        with torch.no_grad():
+            return hom_map.forward(z, method="autograd").detach().cpu().numpy()
+    raise ValueError("initial_point_mode must be 'gauge_center' or 'random'.")
+
+
+def poly_star_benchmark(
+    algorithms=None,
+    common_config=None,
+    algorithm_config=None,
+    alpha=0.3,
+    num_star=4,
+    problem_type="star",
+    poly_config=None,
+    max_iterations=25,
+    max_running_time=5,
+    learning_rate=1e-2,
+    stepsize_rule="constant",
+    lr_decay=0.999,
+    min_lr=1e-6,
+    seed=2025,
+    output_dir=None,
+    device=None,
+    dtype=None,
+    visualize=True,
+    visualize_only=False,
+    show_constraint_notation=False,
+    reference_solver="auto",
+    reference_label=None,
+    reference_grid_size=801,
+    reference_ipopt_solver=PYOMO_NLP_SOLVER,
+    reference_ipopt_options=None,
+    reference_ipopt_num_starts=16,
+    return_context=False,
+):
+    """Small package-native toy benchmark for polytope, star, or intersection sets.
+
+    ``return_context=True`` is intended for in-process instructional use. It
+    returns the normal serializable payload together with the exact problem,
+    map, reference, and records used during the run.
+    """
+
+    reject_algorithm_iteration_budget_keys(algorithm_config, context="algorithm_config")
+    problem_type = str(problem_type).lower()
+    if problem_type not in {"poly", "star", "poly_star"}:
+        raise ValueError("problem_type must be 'poly', 'star', or 'poly_star'")
+    algorithms = list(algorithms or ["Hom-PGD"])
+    effective_common_config = normalize_single_common_config(
+        common_config=common_config,
+    )
+    params = _ineq_algorithm_params(
+        seed,
+        max_iterations,
+        max_running_time,
+        learning_rate,
+        stepsize_rule,
+        lr_decay,
+        min_lr,
+        common_config=effective_common_config,
+    )
+    params = apply_config_groups(
+        params,
+        algorithm_config=algorithm_config,
+    )
+    effective_max_iterations = int(params["common"]["max_iterations"])
+    params = enforce_alm_outer_iteration_budget(params, max_iterations=effective_max_iterations)
+    hom_p_norm = params.get("Hom-PGD", {}).get("hom_p_norm", 2)
+    problem, hom_map = build_poly_star_toy_context(
+        alpha=alpha,
+        num_star=num_star,
+        problem_type=problem_type,
+        poly_config=poly_config,
+        seed=seed,
+        device=device,
+        dtype=dtype,
+        hom_p_norm=hom_p_norm,
+    )
+
+    reference = solve_poly_star_toy_reference(
+        problem_type,
+        problem,
+        reference_solver=reference_solver,
+        reference_label=reference_label,
+        reference_grid_size=reference_grid_size,
+        reference_ipopt_solver=reference_ipopt_solver,
+        reference_ipopt_options=reference_ipopt_options,
+        reference_ipopt_num_starts=reference_ipopt_num_starts,
     )
     reference_payload = {}
     if reference is not None and reference.get("objective") is not None:
@@ -439,6 +524,12 @@ def poly_star_benchmark(
             "reference_status": reference.get("status"),
             "reference_runtime": reference.get("runtime"),
         }
+    init_point = _resolve_toy_initial_point(
+        problem,
+        hom_map,
+        params["common"].get("initial_point_mode", "gauge_center"),
+        seed=seed,
+    )
 
     existing_artifacts = {}
     if visualize_only:
@@ -459,7 +550,7 @@ def poly_star_benchmark(
         records = {}
         summaries = {}
         for algorithm in algorithms:
-            result = run_algorithm(algorithm, problem, params, hom_map=hom_map, init_point=[-1.0, -1.0])
+            result = run_algorithm(algorithm, problem, params, hom_map=hom_map, init_point=init_point)
             ensure_record_violation_split(problem, result)
             records[algorithm] = result
             summaries[algorithm] = summarize_run_record(
@@ -494,7 +585,7 @@ def poly_star_benchmark(
         artifacts = {**artifacts, **viz_artifacts}
 
     primary = algorithms[0]
-    return build_benchmark_payload(
+    payload = build_benchmark_payload(
         objective=summaries[primary]["final_objective"],
         feasible=summaries[primary]["final_violation"] <= 1e-5,
         artifacts=artifacts,
@@ -505,6 +596,17 @@ def poly_star_benchmark(
         problem=f"toy_{problem_type}",
         seed=seed,
     )
+    if return_context:
+        return payload, {
+            "problem": problem,
+            "hom_map": hom_map,
+            "reference": reference,
+            "records": records,
+            "summaries": summaries,
+            "params": params,
+            "initial_point": init_point,
+        }
+    return payload
 
 
-__all__ = ["poly_star_benchmark"]
+__all__ = ["build_poly_star_toy_context", "poly_star_benchmark", "solve_poly_star_toy_reference"]

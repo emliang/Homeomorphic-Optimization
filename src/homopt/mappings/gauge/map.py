@@ -121,9 +121,7 @@ class GaugeMap:
             )
             self.last_forward_mode = "explicit"
             self.forward_mode_counts["explicit"] += 1
-            if return_state:
-                return state["x"], state
-            return GaugeForwardExplicitFunction.apply(
+            output = GaugeForwardExplicitFunction.apply(
                 z,
                 state["x"],
                 state["u"],
@@ -133,8 +131,21 @@ class GaugeMap:
                 state["best_grad_u"],
                 float(self._eps),
             )
+            if return_state:
+                return output, state
+            return output
         if method != "autograd":
             raise ValueError(f"Unsupported GaugeMap forward method: {method}.")
+        if self._has_general_convex_constraints():
+            if self.p_norm != 2:
+                raise NotImplementedError(
+                    "GaugeMap general-convex differentiation requires p_norm=2. "
+                    "Autograd through the bisection boundary search is not a valid derivative."
+                )
+            # Bisection selects branches with torch.where, whose traced derivative
+            # treats the selected radius as locally constant.  Route the default
+            # path through the implicit VJP instead of exposing that wrong gradient.
+            return self.forward(z, method="explicit", tie_tol=tie_tol, return_state=return_state)
         scaling = self._compute_scaling(z, forward=True)
         self.last_forward_mode = "autograd"
         self.forward_mode_counts["autograd"] += 1

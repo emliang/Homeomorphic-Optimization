@@ -17,6 +17,47 @@ from homopt.optim.core.updates import AdamOptimizer, GDOptimizer
 from homopt.optim.first_order.loop import run_first_order_loop
 
 
+def _row_max_violation(value, *, batch_size, device, dtype):
+    """Normalize a per-constraint residual tensor to one value per row."""
+
+    if not torch.is_tensor(value):
+        value = torch.as_tensor(value, device=device, dtype=dtype)
+    else:
+        value = value.to(device=device, dtype=dtype)
+    if value.ndim == 0:
+        return value.expand(batch_size)
+    if value.shape[0] != batch_size:
+        raise ValueError(
+            "Expected one feasibility value per input row; "
+            f"got leading dimension {value.shape[0]} for batch size {batch_size}."
+        )
+    return value.reshape(batch_size, -1).amax(dim=1)
+
+
+def _check_feasibility_violation(data, input_params, y):
+    """Return the maximum checked constraint residual for every batch row."""
+
+    return _row_max_violation(
+        data.check_feasibility(input_params, y),
+        batch_size=y.shape[0],
+        device=y.device,
+        dtype=y.dtype,
+    )
+
+
+def _needs_feasibility_repair(violation, tolerance):
+    return ~torch.isfinite(violation) | (violation > float(tolerance))
+
+
+def _retain_lower_violation_state(current_state, candidate_state, current_violation, candidate_violation):
+    """Keep the lower-violation state when no verified bisection bracket exists."""
+
+    keep_candidate = torch.isfinite(candidate_violation) & (
+        ~torch.isfinite(current_violation) | (candidate_violation < current_violation)
+    )
+    return torch.where(keep_candidate.view(-1, 1), candidate_state, current_state)
+
+
 def pgd_transformed_space(model, data, input_params, args, initial_z=None):
     model.eval()
     batch_size = input_params.shape[0]
@@ -50,7 +91,12 @@ def pgd_transformed_space(model, data, input_params, args, initial_z=None):
         objective = _quadratic_objective(y_full, fixed_Q, fixed_p)
         with torch.inference_mode():
             violations = data.check_feasibility(input_params, y_full)
-            max_violations = torch.amax(violations, dim=1)
+            max_violations = _row_max_violation(
+                violations,
+                batch_size=batch_size,
+                device=device,
+                dtype=dtype,
+            )
         if (iteration % trace_every) == 0:
             trajectory_data.append({
                 'iteration': iteration,
@@ -63,22 +109,42 @@ def pgd_transformed_space(model, data, input_params, args, initial_z=None):
         loss = objective.sum()
         grad_z = torch.autograd.grad(loss, z, retain_graph=False, create_graph=False)[0]
         z.grad = grad_z
+        z_before_step = z.detach().clone()
         optimizer.step()
         with torch.inference_mode():
             u_update = _forward_with_condition(model, z, input_params, condition_emb)
             y_update = data.complete_partial(input_params, data.scale(input_params, u_update))
             violations_update = data.check_feasibility(input_params, y_update)
-            max_violations_update = torch.amax(violations_update, dim=1)
-            if torch.any(max_violations_update > proj_eps):
-                z_proj, _ = homeomorphic_bisection(
-                    model,
-                    data,
-                    z.detach(),
-                    input_params,
-                    args,
-                    condition_emb=condition_emb,
-                )
-                z.copy_(z_proj)
+            max_violations_update = _row_max_violation(
+                violations_update,
+                batch_size=batch_size,
+                device=device,
+                dtype=dtype,
+            )
+            repair_mask = _needs_feasibility_repair(max_violations_update, proj_eps)
+            if bool(torch.any(repair_mask)):
+                current_feasible = ~_needs_feasibility_repair(max_violations, proj_eps)
+                project_mask = repair_mask & current_feasible
+                z_next = z.detach().clone()
+                if bool(torch.any(project_mask)):
+                    z_projected, _ = homeomorphic_bisection(
+                        model,
+                        data,
+                        z_next[project_mask],
+                        input_params[project_mask],
+                        args,
+                        feasible_anchor=z_before_step[project_mask],
+                    )
+                    z_next[project_mask] = z_projected
+                unbracketed_mask = repair_mask & ~current_feasible
+                if bool(torch.any(unbracketed_mask)):
+                    z_next[unbracketed_mask] = _retain_lower_violation_state(
+                        z_before_step[unbracketed_mask],
+                        z_next[unbracketed_mask],
+                        max_violations[unbracketed_mask],
+                        max_violations_update[unbracketed_mask],
+                    )
+                z.copy_(z_next)
         objective_history.append(objective.detach().cpu().numpy())
         violation_history.append(max_violations.detach().cpu().numpy())
         current_obj = objective.mean().item()
@@ -210,11 +276,53 @@ class INNPGDOptimizer:
             z_update = z_state - lr * update
             with torch.inference_mode():
                 y_update = _forward_to_full(z_update)
-                violation_update = violations_fn(input_params, y_update)
-                if torch.any(violation_update > self.proj_eps):
-                    z_proj, _ = self._homeomorphic_bisection(z_update, input_params, condition_emb=condition_emb)
+                check_feasibility = getattr(self.problem, "check_feasibility", None)
+                if callable(check_feasibility):
+                    candidate_violation = _check_feasibility_violation(self.problem, input_params, y_update)
                 else:
+                    candidate_violation = _row_max_violation(
+                        violations_fn(input_params, y_update),
+                        batch_size=batch_size,
+                        device=z_update.device,
+                        dtype=z_update.dtype,
+                    )
+                repair_mask = _needs_feasibility_repair(candidate_violation, self.proj_eps)
+                if not bool(torch.any(repair_mask)):
                     z_proj = z_update
+                else:
+                    y_current = _forward_to_full(z_state)
+                    if callable(check_feasibility):
+                        current_violation = _check_feasibility_violation(self.problem, input_params, y_current)
+                        current_feasible = ~_needs_feasibility_repair(current_violation, self.proj_eps)
+                    else:
+                        current_violation = _row_max_violation(
+                            violations_fn(input_params, y_current),
+                            batch_size=batch_size,
+                            device=z_state.device,
+                            dtype=z_state.dtype,
+                        )
+                        # Without check_feasibility, no anchor is verified for
+                        # homeomorphic_bisection, so retain the lower-violation state.
+                        current_feasible = torch.zeros_like(repair_mask)
+                    z_proj = z_update.detach().clone()
+                    project_mask = repair_mask & current_feasible
+                    if bool(torch.any(project_mask)):
+                        # Recompute the condition embedding for the selected rows;
+                        # a full-batch embedding cannot be reused after masking.
+                        z_projected, _ = self._homeomorphic_bisection(
+                            z_update[project_mask],
+                            input_params[project_mask],
+                            feasible_anchor=z_state[project_mask],
+                        )
+                        z_proj[project_mask] = z_projected
+                    unbracketed_mask = repair_mask & ~current_feasible
+                    if bool(torch.any(unbracketed_mask)):
+                        z_proj[unbracketed_mask] = _retain_lower_violation_state(
+                            z_state[unbracketed_mask],
+                            z_update[unbracketed_mask],
+                            current_violation[unbracketed_mask],
+                            candidate_violation[unbracketed_mask],
+                        )
             return z_proj.detach().clone()
 
         def _evaluate_state(z_state):
@@ -261,7 +369,7 @@ class INNPGDOptimizer:
             per_iter_time=payload["per_iter_time"],
         )
 
-    def _homeomorphic_bisection(self, z_infeasible, input_params, condition_emb=None):
+    def _homeomorphic_bisection(self, z_infeasible, input_params, condition_emb=None, feasible_anchor=None):
         args = {
             'proj_max_steps': self.proj_max_steps,
             'proj_eps': self.proj_eps,
@@ -275,6 +383,7 @@ class INNPGDOptimizer:
             args,
             self.eps_converge,
             condition_emb=condition_emb,
+            feasible_anchor=feasible_anchor,
         )
 
 

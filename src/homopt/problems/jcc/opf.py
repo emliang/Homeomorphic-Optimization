@@ -31,10 +31,15 @@ def _require_powerflow_dependencies():
         ) from _PYPOWER_IMPORT_ERROR
 
 
-def _as_tensor(value, *, device=None):
+def _as_tensor(value, *, device=None, dtype=None):
     if torch.is_tensor(value):
-        return value.to(device=device) if device is not None else value
-    return torch.tensor(value, dtype=torch.float32, device=device)
+        kwargs = {}
+        if device is not None:
+            kwargs["device"] = device
+        if dtype is not None:
+            kwargs["dtype"] = dtype
+        return value.to(**kwargs) if kwargs else value
+    return torch.tensor(value, dtype=dtype or torch.float32, device=device)
 
 
 def _as_numpy(value):
@@ -48,6 +53,8 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
 
     def __init__(self, num_bus=30, config=None):
         _require_powerflow_dependencies()
+        self.device = torch.device("cpu")
+        self.dtype = torch.float32
         self.config = {
             "n_scenarios": 20,
             "epsilon": 0.05,
@@ -124,13 +131,17 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
 
         self.B_bus_reduced = np.delete(np.delete(self.B_bus, self.ref_bus, axis=0), self.ref_bus, axis=1)
         self.B_line_reduced = np.delete(self.B_line, self.ref_bus, axis=1)
-        self.B_bus_tensor = torch.tensor(self.B_bus, dtype=torch.float32)
-        self.B_line_tensor = torch.tensor(self.B_line, dtype=torch.float32)
+        self.B_bus_tensor = torch.tensor(self.B_bus, dtype=self.dtype, device=self.device)
+        self.B_line_tensor = torch.tensor(self.B_line, dtype=self.dtype, device=self.device)
         try:
             self.B_bus_reduced_inv = np.linalg.inv(self.B_bus_reduced)
         except np.linalg.LinAlgError:
             self.B_bus_reduced_inv = np.linalg.pinv(self.B_bus_reduced)
-        self.B_bus_reduced_inv_tensor = torch.tensor(self.B_bus_reduced_inv, dtype=torch.float32)
+        self.B_bus_reduced_inv_tensor = torch.tensor(
+            self.B_bus_reduced_inv,
+            dtype=self.dtype,
+            device=self.device,
+        )
 
     def _setup_constraints(self):
         non_slack_gen_pmin = np.delete(self.gen[:, PMIN], self.slack_gen) / BASEMVA
@@ -175,7 +186,11 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
 
     def sample_instances(self, n_samples, seed=2025, **kwargs):
         del kwargs
-        return _as_tensor(self._draw_scenarios(n_instances=n_samples, seed=seed), device=getattr(self, "device", None))
+        return _as_tensor(
+            self._draw_scenarios(n_instances=n_samples, seed=seed),
+            device=self.device,
+            dtype=self.dtype,
+        )
 
     def sample_instance_batch(self, n_instances=1, seed=2025, **kwargs):
         scenarios = self.sample_instances(n_instances, seed=seed, **kwargs)
@@ -195,13 +210,14 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
     def build_instance(self, input_data, objective_data=None):
         del objective_data
         bound = copy.copy(self)
-        scenarios = _as_tensor(input_data, device=getattr(self, "device", None))
+        scenarios = _as_tensor(input_data, device=self.device, dtype=self.dtype)
         bound.demand_scenarios = scenarios
         bound.n_scenarios = int(scenarios.shape[0])
         bound.config = {**self.config, "n_scenarios": bound.n_scenarios}
         return bound
 
     def to_device(self, device):
+        device = torch.device(device)
         tensor_attrs = [
             "cost_c2",
             "cost_c1",
@@ -217,19 +233,19 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         ]
         for attr_name in tensor_attrs:
             if hasattr(self, attr_name):
-                setattr(self, attr_name, _as_tensor(getattr(self, attr_name), device=device))
-        self.B_bus_reduced_inv_tensor = self.B_bus_reduced_inv_tensor.to(device)
-        self.B_bus_tensor = self.B_bus_tensor.to(device)
-        self.B_line_tensor = self.B_line_tensor.to(device)
-        self.cost_c2_slack = _as_tensor(self.cost_c2_slack, device=device)
-        self.cost_c1_slack = _as_tensor(self.cost_c1_slack, device=device)
-        self.P_slack_min = _as_tensor(self.P_slack_min, device=device)
-        self.P_slack_max = _as_tensor(self.P_slack_max, device=device)
+                setattr(self, attr_name, _as_tensor(getattr(self, attr_name), device=device, dtype=self.dtype))
+        self.B_bus_reduced_inv_tensor = self.B_bus_reduced_inv_tensor.to(device=device, dtype=self.dtype)
+        self.B_bus_tensor = self.B_bus_tensor.to(device=device, dtype=self.dtype)
+        self.B_line_tensor = self.B_line_tensor.to(device=device, dtype=self.dtype)
+        self.cost_c2_slack = _as_tensor(self.cost_c2_slack, device=device, dtype=self.dtype)
+        self.cost_c1_slack = _as_tensor(self.cost_c1_slack, device=device, dtype=self.dtype)
+        self.P_slack_min = _as_tensor(self.P_slack_min, device=device, dtype=self.dtype)
+        self.P_slack_max = _as_tensor(self.P_slack_max, device=device, dtype=self.dtype)
         self.device = device
         if hasattr(self, "gen_to_bus_reduced_matrix"):
-            self.gen_to_bus_reduced_matrix = self.gen_to_bus_reduced_matrix.to(device)
+            self.gen_to_bus_reduced_matrix = self.gen_to_bus_reduced_matrix.to(device=device, dtype=self.dtype)
         if hasattr(self, "demand_reduced_base"):
-            self.demand_reduced_base = self.demand_reduced_base.to(device)
+            self.demand_reduced_base = self.demand_reduced_base.to(device=device, dtype=self.dtype)
         return self
 
     def _precompute_mapping_matrices(self):
@@ -243,27 +259,27 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
                 reduced_bus_idx = bus_idx if bus_idx < self.ref_bus else bus_idx - 1
                 matrix[reduced_bus_idx, gen_col] = 1.0
             gen_col += 1
-        self.gen_to_bus_reduced_matrix = torch.tensor(matrix, dtype=torch.float32, device=getattr(self, "device", "cpu"))
+        self.gen_to_bus_reduced_matrix = torch.tensor(matrix, dtype=self.dtype, device=self.device)
 
-        demand_reduced = torch.zeros(self.n_bus - 1, dtype=torch.float32, device=getattr(self, "device", "cpu"))
-        P_demand_tensor = _as_tensor(self.P_demand_nominal, device=getattr(self, "device", "cpu"))
+        demand_reduced = torch.zeros(self.n_bus - 1, dtype=self.dtype, device=self.device)
+        P_demand_tensor = _as_tensor(self.P_demand_nominal, device=self.device, dtype=self.dtype)
         for bus_idx, demand_val in enumerate(P_demand_tensor):
             if bus_idx != self.ref_bus:
                 reduced_idx = bus_idx if bus_idx < self.ref_bus else bus_idx - 1
                 demand_reduced[reduced_idx] = demand_val
         self.demand_reduced_base = demand_reduced
 
-    def _scenario_tensor(self, scenario_k, device):
+    def _scenario_tensor(self, scenario_k, device, dtype=None):
         if isinstance(scenario_k, int):
             scenario_tensor = self.demand_scenarios[scenario_k]
         else:
             scenario_tensor = scenario_k
-        return _as_tensor(scenario_tensor, device=device)
+        return _as_tensor(scenario_tensor, device=device, dtype=dtype)
 
-    def _coerce_scenario_batch(self, input_batch, device, batch_size=None):
+    def _coerce_scenario_batch(self, input_batch, device, batch_size=None, dtype=None):
         if input_batch is None:
             return None
-        scenario_batch = _as_tensor(input_batch, device=device)
+        scenario_batch = _as_tensor(input_batch, device=device, dtype=dtype)
         if scenario_batch.ndim == 2 and tuple(scenario_batch.shape) == (self.n_scenarios, self.n_bus):
             scenario_batch = scenario_batch.unsqueeze(0)
         elif scenario_batch.ndim != 3 or tuple(scenario_batch.shape[1:]) != (self.n_scenarios, self.n_bus):
@@ -277,51 +293,73 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         )
 
     def _compute_slack_generation(self, P_g, scenario_k):
-        scenario_tensor = self._scenario_tensor(scenario_k, P_g.device)
-        total_demand = (self.P_demand_nominal.unsqueeze(0) * scenario_tensor).sum(dim=1, keepdim=True)
+        scenario_tensor = self._scenario_tensor(scenario_k, P_g.device, dtype=P_g.dtype)
+        demand_nominal = self.P_demand_nominal.to(device=P_g.device, dtype=P_g.dtype)
+        total_demand = (demand_nominal.unsqueeze(0) * scenario_tensor).sum(dim=1, keepdim=True)
         total_non_slack_gen = P_g.sum(dim=1, keepdim=True)
         return total_demand - total_non_slack_gen
 
     def _compute_theta_from_power_balance(self, P_g, scenario_k):
-        scenario_tensor = self._scenario_tensor(scenario_k, P_g.device)
+        scenario_tensor = self._scenario_tensor(scenario_k, P_g.device, dtype=P_g.dtype)
         if not hasattr(self, "gen_to_bus_reduced_matrix"):
             self._precompute_mapping_matrices()
-        p_reduced = torch.matmul(P_g, self.gen_to_bus_reduced_matrix.T)
-        demand_scenario_k = self.P_demand_nominal.unsqueeze(0) * scenario_tensor
+        generator_matrix = self.gen_to_bus_reduced_matrix.to(device=P_g.device, dtype=P_g.dtype)
+        bus_inverse = self.B_bus_reduced_inv_tensor.to(device=P_g.device, dtype=P_g.dtype)
+        demand_nominal = self.P_demand_nominal.to(device=P_g.device, dtype=P_g.dtype)
+        p_reduced = torch.matmul(P_g, generator_matrix.T)
+        demand_scenario_k = demand_nominal.unsqueeze(0) * scenario_tensor
         d_reduced = demand_scenario_k[:, self.non_slack_idx]
         net_injection = p_reduced - d_reduced
-        return torch.matmul(net_injection, self.B_bus_reduced_inv_tensor.T)
+        return torch.matmul(net_injection, bus_inverse.T)
 
     def _create_full_theta(self, theta_reduced):
-        theta_full = torch.zeros(theta_reduced.shape[0], self.n_bus, device=theta_reduced.device)
+        theta_full = torch.zeros(
+            theta_reduced.shape[0],
+            self.n_bus,
+            device=theta_reduced.device,
+            dtype=theta_reduced.dtype,
+        )
         theta_full[:, self.bus_to_angle_idx[:, 0]] = theta_reduced[:, self.bus_to_angle_idx[:, 1]]
         return theta_full
 
     def objective_x(self, x):
         P_g = x
-        total_cost = torch.zeros(x.shape[0], 1, device=x.device)
-        non_slack_cost = torch.sum(self.cost_c2 * P_g * P_g, dim=-1, keepdim=True) + torch.sum(
-            self.cost_c1 * P_g, dim=-1, keepdim=True
+        total_cost = torch.zeros(x.shape[0], 1, device=x.device, dtype=x.dtype)
+        cost_c2 = self.cost_c2.to(device=x.device, dtype=x.dtype)
+        cost_c1 = self.cost_c1.to(device=x.device, dtype=x.dtype)
+        cost_c2_slack = self.cost_c2_slack.to(device=x.device, dtype=x.dtype)
+        cost_c1_slack = self.cost_c1_slack.to(device=x.device, dtype=x.dtype)
+        non_slack_cost = torch.sum(cost_c2 * P_g * P_g, dim=-1, keepdim=True) + torch.sum(
+            cost_c1 * P_g, dim=-1, keepdim=True
         )
         for scenario_idx in range(self.n_scenarios):
             P_slack = self._compute_slack_generation(P_g, scenario_idx)
-            slack_cost = self.cost_c2_slack * P_slack * P_slack + self.cost_c1_slack * P_slack
+            slack_cost = cost_c2_slack * P_slack * P_slack + cost_c1_slack * P_slack
             total_cost += slack_cost / self.n_scenarios
         total_cost += non_slack_cost
         return total_cost / self.n_bus
 
     def objective_xy(self, input_params, y):
-        scenario_batch = self._coerce_scenario_batch(input_params, y.device, batch_size=y.shape[0])
+        scenario_batch = self._coerce_scenario_batch(
+            input_params,
+            y.device,
+            batch_size=y.shape[0],
+            dtype=y.dtype,
+        )
         if scenario_batch is None:
             return self.objective_x(y)
         P_g = y
-        total_cost = torch.zeros(y.shape[0], 1, device=y.device)
-        non_slack_cost = torch.sum(self.cost_c2 * P_g * P_g, dim=-1, keepdim=True) + torch.sum(
-            self.cost_c1 * P_g, dim=-1, keepdim=True
+        total_cost = torch.zeros(y.shape[0], 1, device=y.device, dtype=y.dtype)
+        cost_c2 = self.cost_c2.to(device=y.device, dtype=y.dtype)
+        cost_c1 = self.cost_c1.to(device=y.device, dtype=y.dtype)
+        cost_c2_slack = self.cost_c2_slack.to(device=y.device, dtype=y.dtype)
+        cost_c1_slack = self.cost_c1_slack.to(device=y.device, dtype=y.dtype)
+        non_slack_cost = torch.sum(cost_c2 * P_g * P_g, dim=-1, keepdim=True) + torch.sum(
+            cost_c1 * P_g, dim=-1, keepdim=True
         )
         for scenario_idx in range(self.n_scenarios):
             P_slack = self._compute_slack_generation(P_g, scenario_batch[:, scenario_idx, :])
-            slack_cost = self.cost_c2_slack * P_slack * P_slack + self.cost_c1_slack * P_slack
+            slack_cost = cost_c2_slack * P_slack * P_slack + cost_c1_slack * P_slack
             total_cost += slack_cost / self.n_scenarios
         total_cost += non_slack_cost
         return total_cost / self.n_bus
@@ -337,7 +375,12 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         return torch.clamp(chance_violation, min=0) if clip else chance_violation
 
     def constraint_residual_xy(self, input_params, y, clip=True):
-        scenario_batch = self._coerce_scenario_batch(input_params, y.device, batch_size=y.shape[0])
+        scenario_batch = self._coerce_scenario_batch(
+            input_params,
+            y.device,
+            batch_size=y.shape[0],
+            dtype=y.dtype,
+        )
         if scenario_batch is None:
             return self.constraint_x(y, clip=clip)
         scenario_feasible = self.compute_scenario_feasibility(y, scenario_batch=scenario_batch)
@@ -377,28 +420,41 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         P_slack = self._compute_slack_generation(x, scenario)
         theta_reduced = self._compute_theta_from_power_balance(x, scenario)
         theta_full = self._create_full_theta(theta_reduced)
+        p_min = self.P_min.to(device=x.device, dtype=x.dtype)
+        p_max = self.P_max.to(device=x.device, dtype=x.dtype)
+        p_slack_min = self.P_slack_min.to(device=x.device, dtype=x.dtype)
+        p_slack_max = self.P_slack_max.to(device=x.device, dtype=x.dtype)
+        theta_min = self.theta_min.to(device=x.device, dtype=x.dtype)
+        theta_max = self.theta_max.to(device=x.device, dtype=x.dtype)
+        line_matrix = self.B_line_tensor.to(device=x.device, dtype=x.dtype)
+        s_max = self.S_max.to(device=x.device, dtype=x.dtype)
         residual = torch.cat(
             [
-                self.P_min.unsqueeze(0) - x,
-                x - self.P_max.unsqueeze(0),
-                self.P_slack_min - P_slack,
-                P_slack - self.P_slack_max,
-                self.theta_min.unsqueeze(0) - theta_reduced,
-                theta_reduced - self.theta_max.unsqueeze(0),
-                torch.abs(torch.matmul(theta_full, self.B_line_tensor.T)) - self.S_max.unsqueeze(0),
+                p_min.unsqueeze(0) - x,
+                x - p_max.unsqueeze(0),
+                p_slack_min - P_slack,
+                P_slack - p_slack_max,
+                theta_min.unsqueeze(0) - theta_reduced,
+                theta_reduced - theta_max.unsqueeze(0),
+                torch.abs(torch.matmul(theta_full, line_matrix.T)) - s_max.unsqueeze(0),
             ],
             dim=1,
         )
         return torch.clamp(residual, min=0) if clip else residual
 
     def compute_scenario_feasibility(self, x, scenario_batch=None):
-        scenario_batch = self._coerce_scenario_batch(scenario_batch, x.device, batch_size=x.shape[0])
-        scenario_feasible = torch.zeros(x.shape[0], self.n_scenarios, device=x.device)
+        scenario_batch = self._coerce_scenario_batch(
+            scenario_batch,
+            x.device,
+            batch_size=x.shape[0],
+            dtype=x.dtype,
+        )
+        scenario_feasible = torch.zeros(x.shape[0], self.n_scenarios, device=x.device, dtype=x.dtype)
         for scenario_idx in range(self.n_scenarios):
             scenario_input = self.demand_scenarios[scenario_idx] if scenario_batch is None else scenario_batch[:, scenario_idx, :]
             scenario_residual = self.compute_scenario_k_residual(scenario_input, x)
             feasible = scenario_residual.max(dim=1)[0] <= EPSILON
-            scenario_feasible[:, scenario_idx] = feasible.float()
+            scenario_feasible[:, scenario_idx] = feasible.to(dtype=x.dtype)
         return scenario_feasible
 
     def robust_constraint_x(self, x, clip=True):

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="212" height="22" role="img" aria-label="experiments: script-only">
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".18"/>
+    <stop offset="1" stop-opacity=".18"/>
+  </linearGradient>
+  <clipPath id="r"><rect width="212" height="22" rx="4" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="106" height="22" fill="#555555"/>
+    <rect x="106" width="106" height="22" fill="#805ad5"/>
+    <rect width="212" height="22" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="11">
+    <text x="53.0" y="15" fill="#010101" fill-opacity=".3">experiments</text>
+    <text x="53.0" y="14">experiments</text>
+    <text x="159.0" y="15" fill="#010101" fill-opacity=".3">script-only</text>
+    <text x="159.0" y="14">script-only</text>
+  </g>
+</svg>

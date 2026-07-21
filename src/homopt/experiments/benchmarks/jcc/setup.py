@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homopt.experiments.common.config import merged
+from homopt.experiments.common.config import merged, normalize_jcc_problem_config
 from homopt.problems import JCCDCOPFProblem, bind_singleton_problem_instance
 from homopt.utils import cast_tensors_to_dtype
 
@@ -84,15 +84,31 @@ def normalize_jcc_linear_solver_configs(
     return canonical
 
 
-def _build_jcc_problem(*, num_bus, n_scenarios, epsilon, demand_std, seed, runtime_device, runtime_dtype):
-    problem_cfg = {
-        "n_scenarios": int(n_scenarios),
-        "epsilon": float(epsilon),
-        "demand_std": float(demand_std),
-        "seed": int(seed),
-    }
+def _build_jcc_problem(
+    *,
+    num_bus,
+    n_scenarios,
+    epsilon,
+    demand_std,
+    seed,
+    runtime_device,
+    runtime_dtype,
+    problem_config=None,
+):
+    """Build one JCC-DC-OPF instance with the requested runtime and data source."""
+
+    problem_cfg = normalize_jcc_problem_config(
+        n_scenarios=n_scenarios,
+        epsilon=epsilon,
+        demand_std=demand_std,
+        seed=seed,
+        problem_config=problem_config,
+    )
     problem = JCCDCOPFProblem(num_bus=int(num_bus), config=problem_cfg).to_device(runtime_device)
     problem = cast_tensors_to_dtype(problem, runtime_dtype)
+    # Runtime-created JCC tensors (e.g. the generator-incidence matrix) must
+    # use the same dtype after this initial cast.
+    problem.dtype = runtime_dtype
     return bind_singleton_problem_instance(problem, seed=seed)
 
 __all__ = [

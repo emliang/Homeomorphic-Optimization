@@ -21,6 +21,7 @@ dev = [
 research = [
   "networkx",
   "pypower",
+  "scikit-learn",
   "scipy",
 ]
 solvers = [

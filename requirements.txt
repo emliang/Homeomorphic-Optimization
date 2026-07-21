@@ -2,6 +2,7 @@ numpy
 torch
 tqdm
 scipy
+scikit-learn
 networkx
 cvxpy
 pyomo
