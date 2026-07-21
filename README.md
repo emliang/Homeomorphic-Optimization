@@ -24,13 +24,13 @@ in detail here yet.
 ```bash
 git clone https://github.com/<user-or-org>/Homeomorphic-Optimization.git
 cd Homeomorphic-Optimization
-pip install -e .
+pip install -r requirements.txt
 ```
 
 For experiment workflows:
 
 ```bash
-pip install -e ".[dev,research,solvers,viz,models]"
+pip install -r requirements.txt
 ```
 
 ### Requirements
