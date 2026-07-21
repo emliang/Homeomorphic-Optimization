@@ -7,15 +7,17 @@ from time import perf_counter
 import numpy as np
 import torch
 
-from homopt.optim.core import (
-    _as_problem_row,
+from homopt.optim.core.config import _validate_stepsize_rule
+from homopt.optim.core.constraints import (
     _constraint_residual,
     _constraint_violation_summary,
     _is_better_candidate,
+)
+from homopt.optim.core.penalty import _update_penalty_coefficient
+from homopt.optim.core.tensors import (
+    _as_problem_row,
     _problem_tensor_kwargs,
     _randn_problem_row,
-    _update_penalty_coefficient,
-    _validate_stepsize_rule,
 )
 from homopt.optim.core.verbose import write_iteration_row as _write_verbose_iteration_row
 from homopt.solvers.stiefel import _CvxpyConvexSideProjector

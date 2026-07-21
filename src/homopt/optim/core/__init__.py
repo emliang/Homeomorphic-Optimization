@@ -1,18 +1,23 @@
-"""Shared optimizer implementation helpers."""
+"""Stable public optimizer-core contracts.
 
-from .config import *  # noqa: F401,F403
-from .constraints import *  # noqa: F401,F403
-from .oracles import *  # noqa: F401,F403
-from .penalty import *  # noqa: F401,F403
-from .recording import IterationRecorder
-from .result import *  # noqa: F401,F403
-from .solver_cache import *  # noqa: F401,F403
-from .tensors import *  # noqa: F401,F403
+Implementation helpers stay in their owning submodules.  Optimizers import
+them explicitly so dependency edges are visible in source.
+"""
+
+from .result import (
+    OptimizerRunResult,
+    ParametricOptimizerRunResult,
+    _collect_optimizer_timing_metrics,
+    _normalize_optimizer_result,
+)
 from .updates import AdamOptimizer, GDOptimizer, NormalizedGDOptimizer
-from .verbose import *  # noqa: F401,F403
 
 __all__ = [
-    name
-    for name in globals()
-    if not name.startswith("__") and name not in {"annotations"}
+    "AdamOptimizer",
+    "GDOptimizer",
+    "NormalizedGDOptimizer",
+    "OptimizerRunResult",
+    "ParametricOptimizerRunResult",
+    "_collect_optimizer_timing_metrics",
+    "_normalize_optimizer_result",
 ]

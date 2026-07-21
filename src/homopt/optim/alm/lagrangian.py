@@ -332,7 +332,7 @@ class LagrangianOptimizer(BaseOptimizer):
             outer_stepsize_rule=self.outer_stepsize_rule,
             verbose=verbose,
             progress_disable=isinstance(self.problem, (ProjProblem, LinearProblem)),
-            track_decisions=self.problem.nvar == 2,
+            track_decisions=bool(self.params.get("track_decisions", self.problem.nvar == 2)),
             record_best_decision=self.return_best_violation,
             extra_track_names=_CONSTRAINT_SPLIT_TRACK_NAMES
             + (("first_order_lagrangian_gap",) if self.check_first_order_lagrangian_gap else ()),

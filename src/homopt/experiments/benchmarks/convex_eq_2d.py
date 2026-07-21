@@ -7,7 +7,7 @@ import numpy as np
 from homopt.records.artifacts import load_incremental_comparison_artifacts
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.experiments.benchmarks.convex import convex_algorithm_comparison
-from homopt.solvers.references import (
+from homopt.experiments.common.convex_reference import (
     build_convex_hom_map,
     build_convex_problem,
     build_convex_problem_config,
@@ -154,4 +154,3 @@ __all__ = [
     "TOY_PROBLEM_OVERRIDES",
     "convex_eq_2d_benchmark",
 ]
-

@@ -11,7 +11,9 @@ from homopt.models.inn import (
     _forward_with_condition,
     _quadratic_objective,
 )
-from homopt.optim.core import AdamOptimizer, GDOptimizer, ParametricOptimizerRunResult, _validate_stepsize_rule
+from homopt.optim.core.config import _validate_stepsize_rule
+from homopt.optim.core.result import ParametricOptimizerRunResult
+from homopt.optim.core.updates import AdamOptimizer, GDOptimizer
 from homopt.optim.first_order.loop import run_first_order_loop
 
 

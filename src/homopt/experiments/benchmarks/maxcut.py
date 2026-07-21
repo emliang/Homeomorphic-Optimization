@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import numpy as np
 import torch
 
@@ -26,6 +27,55 @@ from homopt.problems import BMSDP, MaxCutSDP, create_maxcut_problem
 from homopt.solvers import MaxCutSolver, solve_exact_result
 from homopt.utils import cast_tensors_to_dtype, set_global_seed
 from homopt.viz import save_comparison_visualizations
+
+
+def _evaluate_bm_record_in_sdp_space(sdp_problem, factor_problem, record, *, rank):
+    """Return a comparison record evaluated in the original SDP coordinates."""
+
+    factor_trajectory = np.asarray(record.get("x_traj", []), dtype=float)
+    if factor_trajectory.size == 0:
+        raise RuntimeError(
+            "Burer-Monteiro comparison requires an explicit factor trajectory. "
+            "Set track_decisions=True for the ALM baseline."
+        )
+    factor_trajectory = factor_trajectory.reshape(-1, factor_problem.nvar)
+    factor_tensor = torch.as_tensor(
+        factor_trajectory,
+        dtype=sdp_problem.p.dtype,
+        device=sdp_problem.device,
+    )
+    with torch.no_grad():
+        sdp_trajectory = factor_problem.lift_to_sdp_decision(factor_tensor)
+        objective = sdp_problem.objective_x(sdp_trajectory).reshape(-1).detach().cpu().numpy()
+        violation = sdp_problem.constraint_x(sdp_trajectory, clip=True).reshape(-1).detach().cpu().numpy()
+
+        solved_factor = torch.as_tensor(
+            np.asarray(record["x_solved"], dtype=float).reshape(1, -1),
+            dtype=sdp_problem.p.dtype,
+            device=sdp_problem.device,
+        )
+        solved_sdp = factor_problem.lift_to_sdp_decision(solved_factor).detach().cpu().numpy()
+
+    evaluated = copy.deepcopy(record)
+    evaluated.update(
+        {
+            "x_traj": sdp_trajectory.detach().cpu().numpy(),
+            "x_solved": solved_sdp,
+            "obj_traj": objective,
+            "cons_traj": violation,
+            "ineq_violation_traj": violation,
+            "eq_violation_traj": np.zeros_like(violation),
+            "violation_scope": "inequality",
+            "decision_space": "burer_monteiro_factor",
+            "evaluation_space": "maxcut_sdp",
+            "factor_rank": int(rank),
+            "factor_x_traj": factor_trajectory,
+            "factor_x_solved": np.asarray(record["x_solved"], dtype=float),
+            "factor_obj_traj": np.asarray(record.get("obj_traj", []), dtype=float),
+            "factor_cons_traj": np.asarray(record.get("cons_traj", []), dtype=float),
+        }
+    )
+    return evaluated
 
 
 def maxcut_algorithm_comparison(
@@ -105,6 +155,7 @@ def maxcut_algorithm_comparison(
             use_proximal=False,
         ),
     }
+    params["ALM"]["track_decisions"] = True
     params["Hom-PGD"]["hom_map_gradient"] = "autograd"
     params = apply_config_groups(
         params,
@@ -172,11 +223,9 @@ def maxcut_algorithm_comparison(
             else:
                 rank = base_problem.num_node
             problem = cast_tensors_to_dtype(BMSDP(config, rank=rank).to_device(runtime_device), runtime_dtype)
-            init_point = np.random.randn(1, problem.nvar) / problem.num_node
+            init_point = np.random.default_rng(seed + rank).normal(size=(1, problem.nvar)) / problem.num_node
             record = run_algorithm("ALM", problem, params, hom_map=hom_map, init_point=init_point)
-            record["violation_scope"] = "equality"
-            ensure_record_violation_split(problem, record)
-            return record
+            return _evaluate_bm_record_in_sdp_space(base_problem, problem, record, rank=rank)
         problem = cast_tensors_to_dtype(MaxCutSDP(config).to_device(runtime_device), runtime_dtype)
         init_point = np.zeros((1, problem.nvar))
         record = run_algorithm(algorithm, problem, params, hom_map=hom_map, init_point=init_point)

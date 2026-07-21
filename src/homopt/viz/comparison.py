@@ -6,11 +6,9 @@ import json
 from pathlib import Path
 
 import numpy as np
-import torch
 
 from .artifacts import relative_artifacts, save_figure
 from .convergence import save_metric_convergence_bundle
-from .evaluation import problem_tensor_kwargs
 from .style import (
     ALGORITHM_COLORS,
     PAPER_STYLE,
@@ -18,37 +16,7 @@ from .style import (
     require_matplotlib,
     set_axis_labels,
 )
-from .traces import as_numpy, problem_has_equalities
-
-
-def _split_problem_metrics(problem, x_values):
-    x_array = np.asarray(x_values)
-    if x_array.size == 0:
-        return None
-    x = torch.as_tensor(x_array.reshape(-1, x_array.shape[-1]), **problem_tensor_kwargs(problem))
-    with torch.no_grad():
-        objective = problem.objective_x(x).reshape(-1).detach().cpu().numpy()
-        residual = problem.constraint_x(x, clip=False, eq_cons=True)
-        if residual.ndim == 1:
-            residual = residual.view(1, -1)
-        ineq_idx = list(getattr(problem, "ineq_cons", range(residual.shape[1])) or [])
-        eq_idx = list(getattr(problem, "eq_cons", []) or [])
-        ineq_res = residual[:, ineq_idx] if ineq_idx else residual.new_zeros((residual.shape[0], 0))
-        eq_res = residual[:, eq_idx] if eq_idx else residual.new_zeros((residual.shape[0], 0))
-        ineq = (
-            torch.clamp(ineq_res, min=0).max(dim=1).values
-            if ineq_res.numel()
-            else residual.new_zeros(residual.shape[0])
-        )
-        eq = eq_res.abs().max(dim=1).values if eq_res.numel() else residual.new_zeros(residual.shape[0])
-    eq_np = eq.detach().cpu().numpy()
-    ineq_np = ineq.detach().cpu().numpy()
-    return {
-        "objective": objective,
-        "equality_violation": eq_np,
-        "inequality_violation": ineq_np,
-        "full_violation": np.maximum(eq_np, ineq_np),
-    }
+from .traces import as_numpy, problem_has_equalities, record_time_axis, split_problem_metrics
 
 
 def _record_scalar_metrics(record, *, method=None):
@@ -133,7 +101,7 @@ def build_comparison_traces(problem, records, algorithms):
         record = records[method]
         trajectory = as_numpy(record.get("x_traj", []))
         if trajectory.size and trajectory.shape[-1] == int(getattr(problem, "nvar", trajectory.shape[-1])):
-            metrics = _split_problem_metrics(problem, trajectory)
+            metrics = split_problem_metrics(problem, trajectory)
         else:
             metrics = None
         if metrics is None:
@@ -141,18 +109,7 @@ def build_comparison_traces(problem, records, algorithms):
         n_values = max((len(values) for values in metrics.values()), default=0)
         if n_values == 0:
             continue
-        iter_time_values = _record_values(record, "iter_time")
-        if iter_time_values.size == n_values - 1:
-            time = np.concatenate([[0.0], np.cumsum(iter_time_values)])
-        elif iter_time_values.size == n_values:
-            time = np.cumsum(iter_time_values)
-        elif iter_time_values.size == 0 and n_values == 1:
-            time = np.zeros(1, dtype=float)
-        else:
-            raise ValueError(
-                f"Record for {method} has {n_values} metric values but {iter_time_values.size} iter_time values. "
-                "Rerun the experiment to regenerate explicit timing records."
-            )
+        time = record_time_axis(record, n_values)
         traces[method] = {"time": time, **metrics}
     return traces
 

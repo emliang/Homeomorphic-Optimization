@@ -98,18 +98,6 @@ ALM_CVXPY_CONFIG_KEYS = {
     "subproblem_time_limit_sec",
     "solver_verbose",
 }
-ALM_CVXPY_IGNORED_CONFIG_KEYS = {
-    "learning_rate",
-    "outer_lr_decay",
-    "min_lr",
-    "inner_min_lr",
-    "outer_stepsize_rule",
-    "check_first_order_lagrangian_gap",
-    "first_order_lagrangian_gap_threshold",
-    "outer_first_order_gap_threshold",
-}
-
-
 def _normalize_alm_public_algorithm_config(config, *, context):
     normalized = copy.deepcopy(config)
     _reject_config_keys(
@@ -141,10 +129,10 @@ def normalize_alm_algorithm_config(algorithm_name, config, *, outer_config_norma
             config,
             context=f"{algorithm_name} config",
         )
-        unknown_keys = sorted(set(normalized) - ALM_CVXPY_CONFIG_KEYS - ALM_CVXPY_IGNORED_CONFIG_KEYS)
+        unknown_keys = sorted(set(normalized) - ALM_CVXPY_CONFIG_KEYS)
         if unknown_keys:
             raise ValueError(f"Unsupported {algorithm_name} config keys: {unknown_keys}")
-        return {key: value for key, value in normalized.items() if key in ALM_CVXPY_CONFIG_KEYS}
+        return normalized
     return config
 
 
@@ -275,7 +263,16 @@ def apply_config_groups(
     if common_config:
         for key, value in list(params.items()):
             if isinstance(value, dict) and "opt_type" in value:
-                params[key] = merged(value, normalize_alm_algorithm_config(key, common_config))
+                # Common controls can be shared across methods, but exact
+                # equality baselines accept only their explicit solver contract.
+                shared = common_config
+                if key in ALM_CVXPY_ALGORITHMS:
+                    shared = {
+                        name: setting
+                        for name, setting in common_config.items()
+                        if name in ALM_CVXPY_CONFIG_KEYS
+                    }
+                params[key] = merged(value, normalize_alm_algorithm_config(key, shared))
     if "prob" in params:
         params["prob"] = merged(params["prob"], problem_config)
     if algorithm_config:

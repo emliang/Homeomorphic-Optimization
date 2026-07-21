@@ -1,4 +1,4 @@
-"""Convex problem construction and reference-context helpers."""
+"""Convex experiment construction, reference solving, and cache ownership."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from time import perf_counter
 import numpy as np
 import torch
 
-from homopt.records.artifacts import artifact_root
 from homopt.mappings import GaugeMap
-from homopt.problems.evaluation import call_problem_constraint
 from homopt.problems import ConvexOpt, ConvexOptEq, create_test_problem
+from homopt.problems.evaluation import call_problem_constraint
+from homopt.records.artifacts import artifact_root
 from homopt.solvers import ConvexSolver, solve_exact_result
 from homopt.utils import cast_tensors_to_dtype
 
@@ -70,13 +70,7 @@ def normalize_convex_problem_type(problem_type):
     return normalized
 
 
-def build_convex_problem(
-    *,
-    config,
-    runtime_device,
-    runtime_dtype,
-    problem_type="socp",
-):
+def build_convex_problem(*, config, runtime_device, runtime_dtype, problem_type="socp"):
     problem_type = normalize_convex_problem_type(problem_type)
     problem = ConvexOptEq(config) if problem_type == "socp_eq" else ConvexOpt(config)
     return cast_tensors_to_dtype(problem.to_device(runtime_device), runtime_dtype)
@@ -147,7 +141,7 @@ def _approximate_chebyshev_origin(
     learning_rate=5e-2,
     temperature=1e-2,
 ):
-    """Approximate an interior origin for GaugeMap without a CVXPY center solve."""
+    """Approximate an interior origin when a central-point solver is unavailable."""
 
     device = getattr(problem, "device", torch.device("cpu"))
     dtype = getattr(problem.Q, "dtype", torch.float32)
@@ -165,8 +159,7 @@ def _approximate_chebyshev_origin(
     for _ in range(int(max(iterations, 1))):
         optimizer.zero_grad()
         ineq_residual = call_problem_constraint(problem, x_var, include_equalities=False, clip=False)
-        smooth_max_residual = temp * torch.logsumexp(ineq_residual / temp, dim=1).mean()
-        loss = smooth_max_residual
+        loss = temp * torch.logsumexp(ineq_residual / temp, dim=1).mean()
         if include_equality and getattr(problem, "n_eq", 0) > 0:
             eq_residual = problem.eq_constraint_x(x_var)
             loss = loss + 100.0 * torch.mean(eq_residual * eq_residual)
@@ -199,39 +192,26 @@ _CONVEX_REFERENCE_CACHE_FILENAME = "convex_reference_context_cache.npy"
 def _hash_reference_value(hasher, value):
     if value is None:
         hasher.update(b"<none>")
-        return
-    if torch.is_tensor(value):
-        value = value.detach().cpu().numpy()
-    if isinstance(value, np.ndarray):
+    elif torch.is_tensor(value):
+        _hash_reference_value(hasher, value.detach().cpu().numpy())
+    elif isinstance(value, np.ndarray):
         array = np.ascontiguousarray(value)
-        hasher.update(b"array")
-        hasher.update(str(array.shape).encode("utf-8"))
-        hasher.update(str(array.dtype).encode("utf-8"))
+        hasher.update(f"array:{array.shape}:{array.dtype}".encode("utf-8"))
         hasher.update(array.tobytes())
-        return
-    if isinstance(value, dict):
+    elif isinstance(value, dict):
         hasher.update(b"dict")
         for key in sorted(value):
             hasher.update(str(key).encode("utf-8"))
             _hash_reference_value(hasher, value[key])
-        return
-    if isinstance(value, (list, tuple)):
+    elif isinstance(value, (list, tuple)):
         hasher.update(f"seq:{len(value)}".encode("utf-8"))
         for item in value:
             _hash_reference_value(hasher, item)
-        return
-    hasher.update(repr(value).encode("utf-8"))
+    else:
+        hasher.update(repr(value).encode("utf-8"))
 
 
-def _convex_reference_cache_key(
-    problem,
-    *,
-    ip_mode,
-    ip_eps,
-    hom_origin_constraints,
-    hom_origin,
-    origin_include_equality,
-):
+def _reference_cache_key(problem, *, ip_mode, ip_eps, hom_origin_constraints, hom_origin, include_equality):
     hasher = hashlib.sha256()
     hasher.update(f"version:{_CONVEX_REFERENCE_CACHE_VERSION}".encode("utf-8"))
     _hash_reference_value(hasher, getattr(problem, "prob_para", {}))
@@ -241,39 +221,36 @@ def _convex_reference_cache_key(
             "ip_mode": str(ip_mode),
             "ip_eps": float(ip_eps),
             "hom_origin_constraints": str(hom_origin_constraints),
-            "hom_origin": None
-            if hom_origin is None
-            else np.asarray(hom_origin, dtype=float).reshape(-1),
-            "origin_include_equality": bool(origin_include_equality),
+            "hom_origin": None if hom_origin is None else np.asarray(hom_origin, dtype=float).reshape(-1),
+            "include_equality": bool(include_equality),
         },
     )
     return hasher.hexdigest()
 
 
-def _convex_reference_cache_path(output_dir):
+def _reference_cache_path(output_dir):
     root = artifact_root(output_dir)
-    if root is None:
-        return None
-    return root / _CONVEX_REFERENCE_CACHE_FILENAME
+    return None if root is None else root / _CONVEX_REFERENCE_CACHE_FILENAME
 
 
-def _load_convex_reference_cache(cache_path, cache_key):
+def _load_reference_cache(cache_path, cache_key):
     if cache_path is None or not Path(cache_path).exists():
         return None, 0.0
-    start_time = perf_counter()
+    start = perf_counter()
     try:
         cache = np.load(cache_path, allow_pickle=True).item()
-    except (OSError, ValueError, EOFError, AttributeError):
-        return None, perf_counter() - start_time
+    except (OSError, ValueError, EOFError, AttributeError) as exc:
+        raise RuntimeError(f"Unreadable convex reference cache: {cache_path}") from exc
     if not isinstance(cache, dict) or cache.get("version") != _CONVEX_REFERENCE_CACHE_VERSION:
-        return None, perf_counter() - start_time
-    entries = cache.get("entries", {})
-    if not isinstance(entries, dict) or cache_key not in entries:
-        return None, perf_counter() - start_time
-    return copy.deepcopy(entries[cache_key]), perf_counter() - start_time
+        raise ValueError(f"Unsupported convex reference cache schema: {cache_path}")
+    entries = cache.get("entries")
+    if not isinstance(entries, dict):
+        raise ValueError(f"Invalid convex reference cache entries: {cache_path}")
+    entry = entries.get(cache_key)
+    return (copy.deepcopy(entry) if entry is not None else None), perf_counter() - start
 
 
-def _save_convex_reference_cache(cache_path, cache_key, payload):
+def _save_reference_cache(cache_path, cache_key, payload):
     if cache_path is None:
         return
     cache_path = Path(cache_path)
@@ -281,29 +258,21 @@ def _save_convex_reference_cache(cache_path, cache_key, payload):
     cache = {"version": _CONVEX_REFERENCE_CACHE_VERSION, "entries": {}}
     if cache_path.exists():
         try:
-            loaded = np.load(cache_path, allow_pickle=True).item()
-            if isinstance(loaded, dict) and loaded.get("version") == _CONVEX_REFERENCE_CACHE_VERSION:
-                cache = loaded
-                cache.setdefault("entries", {})
-        except (OSError, ValueError, EOFError, AttributeError):
-            pass
+            cache = np.load(cache_path, allow_pickle=True).item()
+        except (OSError, ValueError, EOFError, AttributeError) as exc:
+            raise RuntimeError(f"Unreadable convex reference cache: {cache_path}") from exc
+        if not isinstance(cache, dict) or cache.get("version") != _CONVEX_REFERENCE_CACHE_VERSION:
+            raise ValueError(f"Unsupported convex reference cache schema: {cache_path}")
+        if not isinstance(cache.get("entries"), dict):
+            raise ValueError(f"Invalid convex reference cache entries: {cache_path}")
     cache["entries"][cache_key] = copy.deepcopy(payload)
-    tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    with tmp_path.open("wb") as handle:
+    temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    with temporary.open("wb") as handle:
         np.save(handle, cache, allow_pickle=True)
-    tmp_path.replace(cache_path)
+    temporary.replace(cache_path)
 
 
-def _reference_payload_from_values(
-    *,
-    x_opt,
-    objective_opt,
-    solver_violation,
-    solver_time,
-    x_origin,
-    ip_solver_time,
-    origin_method,
-):
+def _cache_payload(*, x_opt, objective_opt, solver_violation, solver_time, x_origin, ip_solver_time, origin_method):
     payload = {"origin_method": origin_method}
     if x_opt is not None:
         payload.update(
@@ -316,10 +285,7 @@ def _reference_payload_from_values(
         )
     if x_origin is not None:
         payload.update(
-            {
-                "x_origin": np.asarray(x_origin, dtype=float).reshape(-1),
-                "ip_solver_time": ip_solver_time,
-            }
+            {"x_origin": np.asarray(x_origin, dtype=float).reshape(-1), "ip_solver_time": ip_solver_time}
         )
     return payload
 
@@ -343,96 +309,86 @@ def prepare_convex_reference_context(
     cache_reference=True,
 ):
     hom_origin_constraints = normalize_hom_origin_constraints(hom_origin_constraints)
-    origin_include_equality = hom_origin_constraints == "full"
+    include_equality = hom_origin_constraints == "full"
     solver = ConvexSolver(problem.prob_para)
-    cache_path = _convex_reference_cache_path(output_dir) if cache_reference else None
-    cache_key = _convex_reference_cache_key(
+    cache_path = _reference_cache_path(output_dir) if cache_reference else None
+    cache_key = _reference_cache_key(
         problem,
         ip_mode=ip_mode,
         ip_eps=ip_eps,
         hom_origin_constraints=hom_origin_constraints,
         hom_origin=hom_origin,
-        origin_include_equality=origin_include_equality,
+        include_equality=include_equality,
     )
-    cached_payload, cache_load_time = _load_convex_reference_cache(cache_path, cache_key)
-    cached_payload = cached_payload or {}
+    cached, cache_load_time = _load_reference_cache(cache_path, cache_key)
+    cached = cached or {}
     cache_dirty = False
-    reference_cache_hit = False
-    cached_solver_time = None
-    cached_ip_solver_time = None
+    cache_hit = False
+    cached_solver_time = cached_ip_solver_time = None
 
-    x_opt = obj_opt = solver_violation = solver_time = None
+    x_opt = objective_opt = solver_violation = solver_time = None
     if need_opt:
-        if "x_opt" in cached_payload:
-            x_opt = np.asarray(cached_payload["x_opt"], dtype=float).reshape(-1)
-            obj_opt = cached_payload.get("objective_opt")
-            solver_violation = cached_payload.get("solver_violation")
-            cached_solver_time = cached_payload.get("solver_time")
+        if "x_opt" in cached:
+            x_opt = np.asarray(cached["x_opt"], dtype=float).reshape(-1)
+            objective_opt = cached.get("objective_opt")
+            solver_violation = cached.get("solver_violation")
+            cached_solver_time = cached.get("solver_time")
             solver_time = 0.0
-            reference_cache_hit = True
+            cache_hit = True
         else:
-            solver_result = solve_exact_result(solver, "opt")
-            x_opt = solver_result["solution"]
-            solver_time = solver_result["runtime_total"]
-            obj_opt = float(solver_result["objective"]) if solver_result["objective"] is not None else None
-            solver_violation = float(solver_result["violation"]) if solver_result["violation"] is not None else None
+            result = solve_exact_result(solver, "opt")
+            x_opt = result["solution"]
+            solver_time = result["runtime_total"]
+            objective_opt = None if result["objective"] is None else float(result["objective"])
+            solver_violation = None if result["violation"] is None else float(result["violation"])
             cached_solver_time = solver_time
             cache_dirty = True
+
     origin_method = str(ip_mode)
     if hom_origin is not None:
         x_origin = np.asarray(hom_origin, dtype=float).reshape(-1)
         ip_solver_time = 0.0
         origin_method = "provided"
-    elif "x_origin" in cached_payload:
-        x_origin = np.asarray(cached_payload["x_origin"], dtype=float).reshape(-1)
-        origin_method = cached_payload.get("origin_method", origin_method)
-        cached_ip_solver_time = cached_payload.get("ip_solver_time")
+    elif "x_origin" in cached:
+        x_origin = np.asarray(cached["x_origin"], dtype=float).reshape(-1)
+        origin_method = cached.get("origin_method", origin_method)
+        cached_ip_solver_time = cached.get("ip_solver_time")
         ip_solver_time = 0.0
-        reference_cache_hit = True
+        cache_hit = True
     elif ip_mode == "central_ip":
-        ip_result = solve_exact_result(solver, "central_ip", equality=origin_include_equality)
-        x_origin = ip_result["solution"]
-        ip_solver_time = ip_result["runtime_total"]
-        cached_ip_solver_time = ip_solver_time
-        cache_dirty = True
+        result = solve_exact_result(solver, "central_ip", equality=include_equality)
+        x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        cached_ip_solver_time, cache_dirty = ip_solver_time, True
     elif ip_mode == "geometric_central_ip":
-        ip_result = solve_exact_result(solver, "geometric_central_ip", equality=origin_include_equality)
-        x_origin = ip_result["solution"]
-        ip_solver_time = ip_result["runtime_total"]
-        cached_ip_solver_time = ip_solver_time
-        cache_dirty = True
+        result = solve_exact_result(solver, "geometric_central_ip", equality=include_equality)
+        x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        cached_ip_solver_time, cache_dirty = ip_solver_time, True
     elif str(ip_mode).lower() in {"chebyshev", "chebyshev_approx", "approx_chebyshev"}:
-        start_time = perf_counter()
-        x_origin = _approximate_chebyshev_origin(problem, include_equality=origin_include_equality)
-        ip_solver_time = perf_counter() - start_time
+        start = perf_counter()
+        x_origin = _approximate_chebyshev_origin(problem, include_equality=include_equality)
+        ip_solver_time = perf_counter() - start
         origin_method = "chebyshev_approx"
-        cached_ip_solver_time = ip_solver_time
-        cache_dirty = True
+        cached_ip_solver_time, cache_dirty = ip_solver_time, True
     else:
-        ip_result = solve_exact_result(solver, "ip", eps=ip_eps, equality=origin_include_equality)
-        x_origin = ip_result["solution"]
-        ip_solver_time = ip_result["runtime_total"]
-        cached_ip_solver_time = ip_solver_time
-        cache_dirty = True
+        result = solve_exact_result(solver, "ip", eps=ip_eps, equality=include_equality)
+        x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        cached_ip_solver_time, cache_dirty = ip_solver_time, True
+
     if cache_dirty and cache_path is not None:
-        next_payload = dict(cached_payload)
+        next_payload = dict(cached)
         next_payload.update(
-            _reference_payload_from_values(
+            _cache_payload(
                 x_opt=x_opt,
-                objective_opt=obj_opt,
+                objective_opt=objective_opt,
                 solver_violation=solver_violation,
-                solver_time=cached_solver_time if need_opt else cached_payload.get("solver_time"),
-                x_origin=x_origin if hom_origin is None else cached_payload.get("x_origin"),
-                ip_solver_time=cached_ip_solver_time
-                if hom_origin is None
-                else cached_payload.get("ip_solver_time"),
-                origin_method=origin_method
-                if hom_origin is None
-                else cached_payload.get("origin_method", origin_method),
+                solver_time=cached_solver_time if need_opt else cached.get("solver_time"),
+                x_origin=x_origin if hom_origin is None else cached.get("x_origin"),
+                ip_solver_time=cached_ip_solver_time if hom_origin is None else cached.get("ip_solver_time"),
+                origin_method=origin_method if hom_origin is None else cached.get("origin_method", origin_method),
             )
         )
-        _save_convex_reference_cache(cache_path, cache_key, next_payload)
-    x_origin_eq_violation = _origin_equality_violation(problem, x_origin)
+        _save_reference_cache(cache_path, cache_key, next_payload)
+
     hom_map = build_convex_hom_map(
         problem,
         runtime_device=runtime_device,
@@ -444,22 +400,31 @@ def prepare_convex_reference_context(
         hom_map_smooth_tie_tol=hom_map_smooth_tie_tol,
         hom_map_smooth_temperature=hom_map_smooth_temperature,
     )
-    cache_path_value = str(cache_path) if cache_path is not None and Path(cache_path).exists() else None
     return {
         "x_opt": x_opt,
         "x_origin": x_origin,
-        "objective_opt": obj_opt,
+        "objective_opt": objective_opt,
         "solver_violation": solver_violation,
         "solver_time": solver_time,
         "ip_solver_time": ip_solver_time,
         "origin_method": origin_method,
         "hom_origin_constraints": hom_origin_constraints,
-        "x_origin_eq_violation": x_origin_eq_violation,
+        "x_origin_eq_violation": _origin_equality_violation(problem, x_origin),
         "hom_map": hom_map,
-        "reference_cache_hit": reference_cache_hit,
-        "reference_cache_path": cache_path_value,
+        "reference_cache_hit": cache_hit,
+        "reference_cache_path": str(cache_path) if cache_path is not None and cache_path.exists() else None,
         "reference_cache_key": cache_key,
         "reference_cache_load_time": cache_load_time,
         "cached_solver_time": cached_solver_time,
         "cached_ip_solver_time": cached_ip_solver_time,
     }
+
+
+__all__ = [
+    "build_convex_hom_map",
+    "build_convex_problem",
+    "build_convex_problem_config",
+    "normalize_convex_problem_type",
+    "normalize_hom_origin_constraints",
+    "prepare_convex_reference_context",
+]

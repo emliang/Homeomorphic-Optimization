@@ -107,6 +107,15 @@ def write_csv(path, rows, fieldnames):
 
 
 COMPARISON_STORAGE_VERSION = 1
+
+
+def _require_current_comparison_manifest(manifest, path):
+    version = manifest.get("version")
+    if version != COMPARISON_STORAGE_VERSION:
+        raise ValueError(
+            f"Unsupported comparison artifact schema at {path}: version={version!r}; "
+            f"expected {COMPARISON_STORAGE_VERSION}. Rerun the experiment to regenerate artifacts."
+        )
 COMPARISON_RECORDS_DIRNAME = "records"
 COMPARISON_MANIFEST_NAME = "manifest.json"
 COMPARISON_SUMMARY_NAME = "summary.json"
@@ -229,6 +238,7 @@ def load_incremental_comparison_artifacts(
     manifest = _read_json_or_empty(paths["manifest"])
     if not manifest:
         raise FileNotFoundError(f"Missing comparison manifest artifact: {paths['manifest']}")
+    _require_current_comparison_manifest(manifest, paths["manifest"])
     summaries = _read_json_or_empty(paths["summary"])
     result_path = Path(output_dir) / "result.json"
     previous_result = _read_json_or_empty(result_path)
@@ -297,6 +307,8 @@ def save_incremental_comparison_artifacts(
     records_dir = root_paths["records_dir"]
     records_dir.mkdir(parents=True, exist_ok=True)
     old_manifest = _read_json_or_empty(root_paths["manifest"])
+    if old_manifest:
+        _require_current_comparison_manifest(old_manifest, root_paths["manifest"])
     old_summaries = _read_json_or_empty(root_paths["summary"])
     old_record_refs = dict(old_manifest.get("records") or {})
 

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import copy
-import numpy as np
 import torch
 import time
 from tqdm import tqdm
 
 from homopt.optim.base import BaseOptimizer
-from homopt.optim.first_order.loop import run_first_order_loop
-from homopt.optim.core import *
+from homopt.optim.core.config import _validate_stepsize_rule
+from homopt.optim.core.constraints import _constraint_violation, _constraint_violation_split
+from homopt.optim.core.oracles import _linear_oracle_point
+from homopt.optim.core.recording import IterationRecorder
+from homopt.optim.core.result import OptimizerRunResult
+from homopt.optim.core.tensors import _as_problem_row, _randn_problem_row
 from homopt.optim.core.verbose import write_iteration_row as _write_verbose_iteration_row
 
 class FrankWolfeOptimizer(BaseOptimizer):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .traces import as_numpy, split_convex_metrics
+from .traces import as_numpy, split_problem_metrics
 
 
 def plot_bounds(problem, traces, *, padding=0.35, fallback=(-2.5, 2.5)):
@@ -26,7 +26,7 @@ def plot_bounds(problem, traces, *, padding=0.35, fallback=(-2.5, 2.5)):
         y_grid = np.linspace(lower[1], upper[1], 240)
         X, Y = np.meshgrid(x_grid, y_grid)
         points = np.column_stack([X.reshape(-1), Y.reshape(-1)])
-        metrics = split_convex_metrics(problem, points)
+        metrics = split_problem_metrics(problem, points)
         feasible = metrics["inequality_violation"] <= 1e-6
         if feasible.any():
             feasible_points = points[feasible]
@@ -72,7 +72,7 @@ def convex_landscape_grid(problem, low, high, *, grid_size=640):
     y_grid = np.linspace(low[1], high[1], grid_size)
     X, Y = np.meshgrid(x_grid, y_grid)
     points = np.column_stack([X.reshape(-1), Y.reshape(-1)])
-    metrics = split_convex_metrics(problem, points)
+    metrics = split_problem_metrics(problem, points)
     objective = metrics["objective"].reshape(X.shape)
     inequality = metrics["inequality_violation"].reshape(X.shape)
     equality = metrics["equality_violation"].reshape(X.shape)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from .evaluation import problem_tensor_kwargs
+
 
 def as_numpy(value):
     if torch.is_tensor(value):
@@ -41,7 +43,9 @@ def problem_has_equalities(problem):
     return int(getattr(problem, "n_eq", 0) or 0) > 0
 
 
-def split_convex_metrics(problem, x_values):
+def split_problem_metrics(problem, x_values):
+    """Evaluate objective and split constraint violations along decisions."""
+
     if x_values.size == 0:
         empty = np.asarray([], dtype=float)
         return {
@@ -51,7 +55,7 @@ def split_convex_metrics(problem, x_values):
             "full_violation": empty,
         }
 
-    x_tensor = torch.as_tensor(x_values, dtype=torch.float32, device=problem.device)
+    x_tensor = torch.as_tensor(x_values, **problem_tensor_kwargs(problem))
     with torch.no_grad():
         objective = problem.objective_x(x_tensor).detach().reshape(-1).cpu().numpy()
         constraint_x = problem.constraint_x
@@ -87,7 +91,7 @@ def build_convex_2d_traces(problem, records, algorithms):
         record = records[method]
         trajectory = record_trajectory(record, key="x_traj", fallback_key="x_solved", decision_dim=2)
         z_trajectory = record_trajectory(record, key="z_traj", fallback_key=None, decision_dim=2)
-        metrics = split_convex_metrics(problem, trajectory)
+        metrics = split_problem_metrics(problem, trajectory)
         traces[method] = {
             "trajectory": trajectory,
             "z_trajectory": z_trajectory,
@@ -128,6 +132,6 @@ __all__ = [
     "record_time_axis",
     "record_trajectory",
     "reference_objective_from_payload",
-    "split_convex_metrics",
+    "split_problem_metrics",
     "trace_payload",
 ]

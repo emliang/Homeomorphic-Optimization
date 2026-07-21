@@ -30,7 +30,7 @@ from .traces import (
     build_convex_2d_traces,
     reference_objective_from_payload,
     problem_has_equalities,
-    split_convex_metrics,
+    split_problem_metrics,
     trace_payload,
 )
 
@@ -232,5 +232,5 @@ __all__ = [
     "configure_matplotlib_cache",
     "problem_has_equalities",
     "save_convex_2d_visualizations",
-    "split_convex_metrics",
+    "split_problem_metrics",
 ]

@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import copy
-import numpy as np
 import torch
-import time
-from tqdm import tqdm
 
 from homopt.optim.base import BaseOptimizer
+from homopt.optim.core.config import (
+    _build_algorithm_update_backend,
+    _nag_lookahead,
+    _resolve_acceleration_config,
+    _validate_stepsize_rule,
+)
+from homopt.optim.core.constraints import (
+    _CONSTRAINT_SPLIT_TRACK_NAMES,
+    _constraint_violation,
+    _constraint_violation_split,
+)
+from homopt.optim.core.oracles import _project_problem_point
+from homopt.optim.core.result import OptimizerRunResult, _store_constraint_violation_split_metrics
+from homopt.optim.core.tensors import _as_problem_row, _project_to_ball, _randn_problem_row
 from homopt.optim.first_order.loop import run_first_order_loop
-from homopt.optim.core import *
 
 class PGDOptimizer(BaseOptimizer):
     """

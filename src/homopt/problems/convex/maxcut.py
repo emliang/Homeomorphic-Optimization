@@ -82,15 +82,15 @@ class MaxCutSDP(TensorRuntimeMixin):
         X[:, self.upper_triangle_index[:, 0], self.upper_triangle_index[:, 1]] = x
         X = X + X.transpose(1, 2) + torch.eye(self.num_node, device=x.device, dtype=x.dtype).unsqueeze(0)
 
-        # Compute eigenvalues
+        # Compute eigenvalues.  A failed eigendecomposition is a numerical
+        # error in the active solver path, not a large synthetic violation.
         try:
             eigenvals = torch.linalg.eigvalsh(X)
             min_eigenval = torch.min(eigenvals, dim=1, keepdim=True).values
             # Constraint violation is -min_eigenval when positive
             violations = torch.clamp(-min_eigenval, min=0) if clip else -min_eigenval
-        except:
-            # If eigendecomposition fails, use a large violation
-            violations = torch.full((batch_size, 1), 1e6, device=x.device, dtype=x.dtype)
+        except RuntimeError as exc:
+            raise RuntimeError("MaxCut PSD eigendecomposition failed.") from exc
         
         return violations
 
@@ -205,6 +205,24 @@ class BMSDP(MaxCutSDP):
         X = torch.matmul(x, x.transpose(1, 2))
         obj = - torch.sum(self.weights * (1 - X[:, self.edge_index[:,0], self.edge_index[:,1]])).view(-1,1) / 2
         return obj
+
+    def lift_to_sdp_decision(self, factor):
+        """Lift Burer-Monteiro factors ``Y`` to the MaxCut SDP coordinates.
+
+        The returned vector contains the strict upper triangle of ``Y Y^T`` in
+        the coordinate ordering used by :class:`MaxCutSDP`.  It is intended for
+        shared evaluation and reporting, not for the factor-space optimizer.
+        """
+
+        if factor.ndim != 2 or factor.shape[1] != self.nvar:
+            raise ValueError(
+                "BMSDP factor must have shape (batch, num_node * rank); "
+                f"received {tuple(factor.shape)}."
+            )
+        y = factor.reshape(factor.shape[0], self.num_node, self.rank)
+        matrix = y @ y.transpose(1, 2)
+        indices = torch.as_tensor(self.upper_triangle_index, device=factor.device, dtype=torch.long)
+        return matrix[:, indices[:, 0], indices[:, 1]]
     
     def gradient_objective_x(self, x, auto_grad=True):
         """

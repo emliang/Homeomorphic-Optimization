@@ -35,7 +35,7 @@ from homopt.experiments.method_specs import (
     build_penalty_method_params,
 )
 from homopt.experiments.common.naming import labeled_artifact_prefix
-from homopt.solvers.references import (
+from homopt.experiments.common.convex_reference import (
     build_convex_problem,
     build_convex_problem_config,
     normalize_convex_problem_type,
