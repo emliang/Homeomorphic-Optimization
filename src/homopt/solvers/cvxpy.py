@@ -20,7 +20,7 @@ _CVXPY_SOLVER_CACHE = {}
 def _require_cvxpy():
     if cp is None:
         raise ImportError(
-            "This solver requires cvxpy. Install with: pip install -e .[solvers]"
+            "This solver requires cvxpy. Install with: pip install -r requirements.txt"
         ) from _CVXPY_IMPORT_ERROR
     return cp
 

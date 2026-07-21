@@ -14,7 +14,7 @@ def _require_torchvision():
         from torchvision import datasets, transforms
     except ImportError as exc:
         raise ImportError(
-            "Adversarial workflow requires torchvision. Install with: pip install -e .[research]"
+            "Adversarial workflow requires torchvision. Install with: pip install -r requirements.txt"
         ) from exc
     return datasets, transforms
 

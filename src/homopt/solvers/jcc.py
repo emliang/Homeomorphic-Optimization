@@ -17,7 +17,7 @@ def _require_cvxpy():
         import cvxpy as cp
     except ImportError as exc:  # pragma: no cover - dependency availability varies by env
         raise ImportError(
-            "JCC-DC-OPF solver requires cvxpy. Install with: pip install -e .[solvers]"
+            "JCC-DC-OPF solver requires cvxpy. Install with: pip install -r requirements.txt"
         ) from exc
     return cp
 

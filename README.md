@@ -41,6 +41,11 @@ pip install -r requirements.txt
 - Optional experiment dependencies: SciPy, NetworkX, CVXPY, Pyomo,
   Matplotlib, pandas, seaborn, torchvision, pypower
 
+For `scripts/hom_pgd/run_poly_star_compare.py` with `problem_type="star"`
+or `"intersection"`, install the IPOPT executable separately and make it
+available on `PATH`; Pyomo is only the Python interface. The default reference
+configuration uses IPOPT and fails explicitly when it is unavailable.
+
 After installation, a quick import check is:
 
 ```bash

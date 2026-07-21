@@ -354,7 +354,7 @@ def create_maxcut_problem(para):
         import networkx as nx
     except ImportError as exc:
         raise ImportError(
-            "create_maxcut_problem requires networkx. Install with: pip install -e .[research]"
+            "create_maxcut_problem requires networkx. Install with: pip install -r requirements.txt"
         ) from exc
 
     Graph = nx.erdos_renyi_graph(n, alpha, seed=para['seed'])

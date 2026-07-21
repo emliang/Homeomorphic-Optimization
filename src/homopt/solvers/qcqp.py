@@ -13,7 +13,7 @@ from .pyomo import PYOMO_AVAILABLE, PYOMO_NLP_SOLVER, SolverStatus, TerminationC
 class QCQPSolver:
     def __init__(self, problem_params):
         if not PYOMO_AVAILABLE:
-            raise ImportError("Pyomo is required for QCQPSolver. Install with: pip install -e .[solvers]")
+            raise ImportError("Pyomo is required for QCQPSolver. Install with: pip install -r requirements.txt")
         (self.Q, self.p, self.A, self.b, self.Qq, self.pq, self.bq, self.L, self.U, self.R) = problem_params
         self.n_vars = len(self.p)
         self.n_lin = self.A.shape[0] if self.A is not None else 0

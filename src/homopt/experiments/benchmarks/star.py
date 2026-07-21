@@ -173,7 +173,7 @@ def _toy_ipopt_reference(problem, *, solver=PYOMO_NLP_SOLVER, options=None, num_
     """IPOPT reference for the nonconvex two-dimensional star toy problems."""
 
     if not PYOMO_AVAILABLE or pyo is None:
-        raise ImportError("Pyomo is required for toy IPOPT references. Install with: pip install -e .[solvers]")
+        raise ImportError("Pyomo is required for toy IPOPT references. Install with: pip install -r requirements.txt")
     if int(getattr(problem, "nvar", 0)) != 2:
         raise ValueError("Toy IPOPT reference currently supports only two-dimensional problems.")
 

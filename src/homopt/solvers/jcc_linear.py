@@ -22,7 +22,7 @@ else:  # pragma: no cover - import success path
 def _require_cvxpy():
     if _CVXPY_IMPORT_ERROR is not None:
         raise ImportError(
-            "JCC linear solvers require cvxpy. Install with: pip install -e .[solvers]"
+            "JCC linear solvers require cvxpy. Install with: pip install -r requirements.txt"
         ) from _CVXPY_IMPORT_ERROR
     return cp
 

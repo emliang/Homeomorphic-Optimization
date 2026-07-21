@@ -180,7 +180,7 @@ def require_matplotlib():
         import matplotlib.pyplot as plt
     except ImportError as exc:
         raise ImportError(
-            "Visualization requires matplotlib. Install with: pip install -e .[viz]"
+            "Visualization requires matplotlib. Install with: pip install -r requirements.txt"
         ) from exc
     apply_paper_style_rcparams()
     return plt
