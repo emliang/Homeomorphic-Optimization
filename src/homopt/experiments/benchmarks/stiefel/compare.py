@@ -555,6 +555,23 @@ def stiefel_algorithm_comparison(
             records=records,
             summaries=summaries,
             algorithm_order=algorithms,
+            run_identity={
+                "benchmark": "stiefel_algorithm_comparison",
+                "seed": params["seed"],
+                "problem_config": params["problem_config"],
+                "mapping": params["mapping"],
+                "initialization": params.get("initialization"),
+                "common_config": params["common_config"],
+                "outer_common": _outer_config(params),
+                "inner_solver_common": _inner_config(params),
+                "runtime": {"device": str(params.get("device")), "dtype": str(params.get("dtype"))},
+                "reference": {
+                    "include_reference_solver": include_reference_solver,
+                    "need_opt": reference_need_opt,
+                    "allow_missing": params.get("allow_missing_reference", False),
+                    "solver_config": _algorithm_config(params).get("StiefelIPOPT", {}),
+                },
+            },
             manifest_metadata={
                 "problem_family": "stiefel",
                 "scale_label": scale_label(params),

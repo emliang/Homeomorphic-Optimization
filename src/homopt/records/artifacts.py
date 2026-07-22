@@ -107,6 +107,106 @@ def write_csv(path, rows, fieldnames):
 
 
 COMPARISON_STORAGE_VERSION = 1
+COMPARISON_IDENTITY_VERSION = 1
+
+
+def _identity_json_value(value):
+    """Return a deterministic, JSON-safe representation for identity hashing.
+
+    Comparison identities describe the shared experimental instance, not the
+    potentially large records saved for each method.  Arrays and tensors are
+    represented by shape, dtype, and content digest so explicit problem data
+    remains part of the identity without bloating ``manifest.json``.
+    """
+
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if np.isnan(value):
+            return {"__float__": "nan"}
+        if np.isposinf(value):
+            return {"__float__": "inf"}
+        if np.isneginf(value):
+            return {"__float__": "-inf"}
+        return value
+    if isinstance(value, np.generic):
+        return _identity_json_value(value.item())
+    if isinstance(value, Path):
+        return {"__path__": str(value)}
+    if isinstance(value, (torch.dtype, torch.device)):
+        return {"__torch_type__": str(value)}
+    if isinstance(value, bytes):
+        return {"__bytes_sha256__": hashlib.sha256(value).hexdigest()}
+    if isinstance(value, np.ndarray):
+        array = np.ascontiguousarray(value)
+        return {
+            "__ndarray__": {
+                "dtype": str(array.dtype),
+                "shape": list(array.shape),
+                "sha256": hashlib.sha256(array.tobytes()).hexdigest(),
+            }
+        }
+    if torch.is_tensor(value):
+        tensor = value.detach().cpu().contiguous()
+        return {
+            "__tensor__": {
+                "dtype": str(tensor.dtype),
+                "shape": list(tensor.shape),
+                "sha256": hashlib.sha256(tensor.numpy().tobytes()).hexdigest(),
+            }
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _identity_json_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple, range)):
+        return [_identity_json_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_identity_json_value(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
+    raise TypeError(
+        "Comparison run identities must contain deterministic configuration values; "
+        f"got unsupported value of type {type(value).__name__}."
+    )
+
+
+def build_comparison_run_identity(payload):
+    """Build the immutable identity stored with incremental comparison records."""
+
+    canonical_payload = _identity_json_value(payload)
+    encoded = json.dumps(
+        canonical_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return {
+        "version": COMPARISON_IDENTITY_VERSION,
+        "fingerprint": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "payload": canonical_payload,
+    }
+
+
+def _require_matching_comparison_run_identity(manifest, identity, path):
+    stored_identity = manifest.get("run_identity")
+    if not isinstance(stored_identity, dict):
+        raise ValueError(
+            f"Existing comparison artifacts at {path} lack a run identity. "
+            "Rerun the comparison into a fresh output directory before adding methods."
+        )
+    if stored_identity.get("version") != COMPARISON_IDENTITY_VERSION:
+        raise ValueError(
+            f"Unsupported comparison run identity at {path}: "
+            f"version={stored_identity.get('version')!r}; "
+            f"expected {COMPARISON_IDENTITY_VERSION}."
+        )
+    if stored_identity.get("fingerprint") != identity["fingerprint"]:
+        raise ValueError(
+            f"Comparison artifact run identity mismatch at {path}. Existing records belong to "
+            "a different base experiment; use a fresh output directory instead of merging them."
+        )
 
 
 def _require_current_comparison_manifest(manifest, path):
@@ -292,8 +392,15 @@ def save_incremental_comparison_artifacts(
     summaries,
     algorithm_order=None,
     manifest_metadata=None,
+    run_identity=None,
 ):
-    """Save comparison records per algorithm and keep a lightweight manifest/summary."""
+    """Save comparison records per algorithm and keep a lightweight manifest/summary.
+
+    ``run_identity`` must capture the shared instance and comparison settings.
+    It deliberately excludes the selected method list so compatible partial
+    method runs can be added later, while preventing records from distinct
+    instances/configurations from being merged into one result directory.
+    """
 
     root_paths = comparison_storage_paths(output_dir)
     if root_paths is None:
@@ -304,13 +411,21 @@ def save_incremental_comparison_artifacts(
         )
         return {}, comparison_views, dict(records), dict(summaries)
 
-    records_dir = root_paths["records_dir"]
-    records_dir.mkdir(parents=True, exist_ok=True)
     old_manifest = _read_json_or_empty(root_paths["manifest"])
     if old_manifest:
         _require_current_comparison_manifest(old_manifest, root_paths["manifest"])
+    if run_identity is None:
+        raise ValueError(
+            "save_incremental_comparison_artifacts requires run_identity when output_dir is set. "
+            "Pass the shared problem and comparison configuration used by every method."
+        )
+    identity = build_comparison_run_identity(run_identity)
+    if old_manifest:
+        _require_matching_comparison_run_identity(old_manifest, identity, root_paths["manifest"])
     old_summaries = _read_json_or_empty(root_paths["summary"])
     old_record_refs = dict(old_manifest.get("records") or {})
+    records_dir = root_paths["records_dir"]
+    records_dir.mkdir(parents=True, exist_ok=True)
 
     record_refs = dict(old_record_refs)
     slim_summaries = dict(old_summaries)
@@ -331,11 +446,15 @@ def save_incremental_comparison_artifacts(
     stored_algorithms = [name for name in stored_algorithms if name in record_refs]
     manifest = {
         "version": COMPARISON_STORAGE_VERSION,
+        "run_identity": identity,
         "algorithms": stored_algorithms,
         "records": {name: record_refs[name] for name in stored_algorithms},
     }
-    if manifest_metadata:
-        manifest["metadata"] = _slim_json_payload(manifest_metadata)
+    metadata = old_manifest.get("metadata")
+    if manifest_metadata is not None:
+        metadata = _slim_json_payload(manifest_metadata)
+    if metadata is not None:
+        manifest["metadata"] = metadata
     save_json(root_paths["manifest"], manifest)
     save_json(root_paths["summary"], {name: slim_summaries[name] for name in stored_algorithms})
 
@@ -397,6 +516,7 @@ __all__ = [
     "artifact_mapping",
     "artifact_ref",
     "artifact_root",
+    "build_comparison_run_identity",
     "build_benchmark_payload",
     "build_visualize_only_benchmark_payload",
     "comparison_storage_paths",

@@ -107,7 +107,17 @@ def build_jcc_iterative_method_rows(problem, results):
             total_wall_time=payload.get("total_wall_time"),
             inner_iter_time=payload.get("inner_iter_time"),
         )
-        for key in ("chance_feasibility_rate", "violation", "feasible"):
+        for key in (
+            "chance_feasibility_rate",
+            "per_instance_chance_feasibility_rates",
+            "worst_instance_chance_feasibility_rate",
+            "violation",
+            "feasible",
+            "training_constraint_surrogate",
+            "bisection_feasibility_metric",
+            "final_evaluation_metric",
+            "chance_epsilon",
+        ):
             if key in payload:
                 extras[key] = payload[key]
         rows.append(
@@ -145,6 +155,17 @@ def build_jcc_comparison_metrics(*, num_bus, n_scenarios, solver_result, cvar_re
                 "inn_pgd_final_violation": results["INN-PGD"]["final_violation"],
                 "inn_pgd_objective": results["INN-PGD"]["final_objective"],
                 "inn_pgd_feasibility_rate": results["INN-PGD"]["chance_feasibility_rate"],
+                "inn_pgd_worst_instance_chance_feasibility_rate": results["INN-PGD"].get(
+                    "worst_instance_chance_feasibility_rate"
+                ),
+                "inn_pgd_training_constraint_surrogate": results["INN-PGD"].get(
+                    "training_constraint_surrogate"
+                ),
+                "inn_pgd_bisection_feasibility_metric": results["INN-PGD"].get(
+                    "bisection_feasibility_metric"
+                ),
+                "inn_pgd_final_evaluation_metric": results["INN-PGD"].get("final_evaluation_metric"),
+                "inn_pgd_chance_epsilon": results["INN-PGD"].get("chance_epsilon"),
             }
             if "INN-PGD" in results
             else {}

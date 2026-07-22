@@ -19,6 +19,7 @@ from homopt.experiments.common.config import (
     normalize_single_common_config,
     reject_algorithm_iteration_budget_keys,
 )
+from homopt.experiments.common.convex_reference import resolve_convex_reference_label
 from homopt.experiments.common.run_records import ensure_record_violation_split, summarize_run_record
 from homopt.experiments.common.runtime import resolve_runtime
 from homopt.experiments.common.single_problem import _ineq_algorithm_params
@@ -287,14 +288,39 @@ def _toy_reference_solution(
     if solver_name in {"convex", "cvxpy", "mosek"}:
         if problem_type != "poly":
             raise ValueError("Convex reference solver is only valid for problem_type='poly'.")
-        result = ConvexSolver(problem.prob_para).solve_result("opt")
+        requested_cvxpy_solver = "MOSEK" if solver_name == "mosek" else None
+        result = ConvexSolver(problem.prob_para).solve_result(
+            "opt",
+            solver_name=requested_cvxpy_solver,
+        )
+        extras = dict(result.get("extras") or {})
+        if result.get("solution") is None or result.get("status") in {"error", "failed"}:
+            requested = extras.get("solver_requested") or requested_cvxpy_solver or "auto"
+            detail = extras.get("error")
+            message = f"Toy convex reference solve failed for solver request {requested!r}."
+            if detail:
+                message = f"{message} Backend error: {detail}"
+            raise RuntimeError(message)
+        solver_provenance = {
+            "solver_requested": extras.get("solver_requested") or requested_cvxpy_solver or "auto",
+            "solver_used": extras.get("solver_used"),
+            "solver_attempts": extras.get("solver_attempts"),
+            "solver_fallback_used": extras.get("solver_fallback_used"),
+            "solver_candidates": extras.get("solver_candidates"),
+            "cvxpy_status": extras.get("cvxpy_status"),
+        }
         return {
-            "label": reference_label or "MOSEK",
+            "label": resolve_convex_reference_label(reference_label, solver_provenance),
             "objective": result.get("objective"),
             "solution": result.get("solution"),
             "violation": result.get("violation"),
             "status": result.get("status"),
             "runtime": result.get("runtime_total"),
+            "solver_requested": solver_provenance["solver_requested"],
+            "solver_used": solver_provenance["solver_used"],
+            "solver_attempts": solver_provenance["solver_attempts"],
+            "solver_fallback_used": solver_provenance["solver_fallback_used"],
+            "solver_provenance": solver_provenance,
         }
     if solver_name in {"ipopt", "pyomo-ipopt", "pyomo_ipopt"}:
         if problem_type == "poly":
@@ -311,7 +337,7 @@ def _toy_reference_solution(
         if result is not None and reference_label is not None:
             result["label"] = reference_label
         return result
-    raise ValueError("reference_solver must be 'auto', 'none', 'convex', 'ipopt', or 'grid'.")
+    raise ValueError("reference_solver must be 'auto', 'none', 'convex', 'mosek', 'ipopt', or 'grid'.")
 
 
 def build_poly_star_toy_context(
@@ -504,33 +530,9 @@ def poly_star_benchmark(
         hom_p_norm=hom_p_norm,
     )
 
-    reference = solve_poly_star_toy_reference(
-        problem_type,
-        problem,
-        reference_solver=reference_solver,
-        reference_label=reference_label,
-        reference_grid_size=reference_grid_size,
-        reference_ipopt_solver=reference_ipopt_solver,
-        reference_ipopt_options=reference_ipopt_options,
-        reference_ipopt_num_starts=reference_ipopt_num_starts,
-    )
+    reference = None
     reference_payload = {}
-    if reference is not None and reference.get("objective") is not None:
-        reference_payload = {
-            "reference_label": reference.get("label"),
-            "reference_objective": float(reference["objective"]),
-            "reference_solution": np.asarray(reference.get("solution"), dtype=float).reshape(-1).tolist(),
-            "reference_violation": reference.get("violation"),
-            "reference_status": reference.get("status"),
-            "reference_runtime": reference.get("runtime"),
-        }
-    init_point = _resolve_toy_initial_point(
-        problem,
-        hom_map,
-        params["common"].get("initial_point_mode", "gauge_center"),
-        seed=seed,
-    )
-
+    init_point = None
     existing_artifacts = {}
     if visualize_only:
         visual_state = load_visualize_only_comparison_artifacts(
@@ -541,12 +543,50 @@ def poly_star_benchmark(
         summaries = visual_state["summaries"]
         existing_artifacts = visual_state["artifacts"]
         previous_metrics = visual_state["metrics"]
-        if not reference_payload and previous_metrics.get("reference_objective") is not None:
+        stored_metadata = dict(visual_state["manifest"].get("metadata", {}) or {})
+        stored_reference_objective = previous_metrics.get(
+            "reference_objective",
+            stored_metadata.get("reference_objective"),
+        )
+        if stored_reference_objective is not None:
             reference_payload = {
-                "reference_label": previous_metrics.get("reference_label"),
-                "reference_objective": previous_metrics.get("reference_objective"),
+                "reference_label": previous_metrics.get(
+                    "reference_label",
+                    stored_metadata.get("reference_label"),
+                ),
+                "reference_objective": stored_reference_objective,
             }
     else:
+        reference = solve_poly_star_toy_reference(
+            problem_type,
+            problem,
+            reference_solver=reference_solver,
+            reference_label=reference_label,
+            reference_grid_size=reference_grid_size,
+            reference_ipopt_solver=reference_ipopt_solver,
+            reference_ipopt_options=reference_ipopt_options,
+            reference_ipopt_num_starts=reference_ipopt_num_starts,
+        )
+        if reference is not None and reference.get("objective") is not None:
+            reference_payload = {
+                "reference_label": reference.get("label"),
+                "reference_objective": float(reference["objective"]),
+                "reference_solution": np.asarray(reference.get("solution"), dtype=float).reshape(-1).tolist(),
+                "reference_violation": reference.get("violation"),
+                "reference_status": reference.get("status"),
+                "reference_runtime": reference.get("runtime"),
+                "reference_solver_requested": reference.get("solver_requested"),
+                "reference_solver_used": reference.get("solver_used"),
+                "reference_solver_attempts": reference.get("solver_attempts"),
+                "reference_solver_fallback_used": reference.get("solver_fallback_used"),
+                "reference_solver_provenance": reference.get("solver_provenance"),
+            }
+        init_point = _resolve_toy_initial_point(
+            problem,
+            hom_map,
+            params["common"].get("initial_point_mode", "gauge_center"),
+            seed=seed,
+        )
         records = {}
         summaries = {}
         for algorithm in algorithms:
@@ -564,7 +604,32 @@ def poly_star_benchmark(
         records=records,
         summaries=summaries,
         algorithm_order=algorithms,
-        manifest_metadata={"problem_family": f"toy_{problem_type}"},
+        run_identity={
+            "benchmark": "poly_star_benchmark",
+            "problem": {
+                "type": problem_type,
+                "alpha": alpha,
+                "num_star": num_star,
+                "poly_config": poly_config,
+                "seed": seed,
+            },
+            "common_config": params["common"],
+            "mapping": {"hom_p_norm": hom_p_norm},
+            "runtime": {"device": str(device), "dtype": str(dtype)},
+            "reference": {
+                "solver": reference_solver,
+                "label": reference_label,
+                "grid_size": reference_grid_size,
+                "ipopt_solver": reference_ipopt_solver,
+                "ipopt_options": reference_ipopt_options,
+                "ipopt_num_starts": reference_ipopt_num_starts,
+            },
+        },
+        manifest_metadata={
+            "problem_family": f"toy_{problem_type}",
+            "reference_label": reference_payload.get("reference_label"),
+            "reference_objective": reference_payload.get("reference_objective"),
+        },
     )
     artifacts = {**existing_artifacts, **artifacts}
 

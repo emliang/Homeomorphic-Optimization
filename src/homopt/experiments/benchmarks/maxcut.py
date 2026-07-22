@@ -165,6 +165,54 @@ def maxcut_algorithm_comparison(
 
     config = create_maxcut_problem({"seed": seed, "n": n, "alpha": alpha})
     base_problem = cast_tensors_to_dtype(MaxCutSDP(config).to_device(runtime_device), runtime_dtype)
+
+    if visualize_only:
+        visual_state = load_visualize_only_comparison_artifacts(
+            output_dir,
+            algorithms=algorithms,
+        )
+        records = visual_state["records"]
+        summaries = visual_state["summaries"]
+        previous_result = visual_state["previous_result"]
+        artifacts = visual_state["artifacts"]
+        stored_algorithms = visual_state["stored_algorithms"]
+        stored_metadata = dict(visual_state["manifest"].get("metadata", {}) or {})
+        stored_reference_objective = previous_result.get("metrics", {}).get(
+            "reference_objective",
+            stored_metadata.get("reference_objective"),
+        )
+        if stored_reference_objective is not None and previous_result.get("metrics", {}).get("reference_objective") is None:
+            previous_result = {
+                **previous_result,
+                "metrics": {
+                    **dict(previous_result.get("metrics", {}) or {}),
+                    "reference_objective": stored_reference_objective,
+                    "reference_label": stored_metadata.get("reference_label", reference_label),
+                },
+            }
+        if visualize and output_dir is not None:
+            artifacts.update(
+                save_comparison_visualizations(
+                    problem=base_problem,
+                    records=records,
+                    algorithms=stored_algorithms,
+                    output_dir=output_dir,
+                    prefix=visualization_prefix,
+                    reference_objective=stored_reference_objective,
+                    reference_label=reference_label,
+                    method_labels=method_labels,
+                    violation_y_min=float(common_params["convergence_threshold"]),
+                    show_convergence_legend=show_convergence_legend,
+                )
+            )
+        return build_visualize_only_benchmark_payload(
+            previous_result=previous_result,
+            summaries=summaries,
+            artifacts=artifacts,
+            requested_algorithms=algorithms,
+            algorithms=stored_algorithms,
+        )
+
     solver = MaxCutSolver(base_problem.prob_para)
     solver_result = solve_exact_result(solver, "opt")
     x_opt = solver_result["solution"]
@@ -179,39 +227,6 @@ def maxcut_algorithm_comparison(
         smooth=bool(common_params.get("smooth", True)),
     ).to_device(runtime_device)
     hom_map = cast_tensors_to_dtype(hom_map, runtime_dtype)
-
-    if visualize_only:
-        visual_state = load_visualize_only_comparison_artifacts(
-            output_dir,
-            algorithms=algorithms,
-        )
-        records = visual_state["records"]
-        summaries = visual_state["summaries"]
-        previous_result = visual_state["previous_result"]
-        artifacts = visual_state["artifacts"]
-        stored_algorithms = visual_state["stored_algorithms"]
-        if visualize and output_dir is not None:
-            artifacts.update(
-                save_comparison_visualizations(
-                    problem=base_problem,
-                    records=records,
-                    algorithms=stored_algorithms,
-                    output_dir=output_dir,
-                    prefix=visualization_prefix,
-                    reference_objective=previous_result.get("metrics", {}).get("reference_objective", obj_opt),
-                    reference_label=reference_label,
-                    method_labels=method_labels,
-                    violation_y_min=float(common_params["convergence_threshold"]),
-                    show_convergence_legend=show_convergence_legend,
-                )
-            )
-        return build_visualize_only_benchmark_payload(
-            previous_result=previous_result,
-            summaries=summaries,
-            artifacts=artifacts,
-            requested_algorithms=algorithms,
-            algorithms=stored_algorithms,
-        )
 
     def _run_maxcut_record(algorithm):
         if algorithm.startswith("ALM-"):
@@ -245,6 +260,13 @@ def maxcut_algorithm_comparison(
         records=records,
         summaries=summaries,
         algorithm_order=records.keys(),
+        run_identity={
+            "benchmark": "maxcut_algorithm_comparison",
+            "problem_config": config,
+            "common_config": params["common"],
+            "runtime": {"device": str(runtime_device), "dtype": str(runtime_dtype)},
+            "reference_label": reference_label,
+        },
         manifest_metadata={
             "problem_type": "maxcut_sdp",
             "reference_label": reference_label,

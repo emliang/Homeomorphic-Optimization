@@ -8,10 +8,11 @@ import torch
 
 from homopt.problems.base import ProblemInstanceBatch, StateBackedParametricProblemBase
 from homopt.problems.opf_cases import load_pglib_opf_case
+from homopt.utils import resolve_torch_dtype
 
 try:
-    from pypower.idx_brch import BR_X, RATE_A
-    from pypower.idx_bus import BUS_TYPE, PD, PQ, REF
+    from pypower.idx_brch import BR_X, F_BUS, RATE_A, T_BUS
+    from pypower.idx_bus import BUS_I, BUS_TYPE, PD, PQ, REF
     from pypower.idx_gen import GEN_BUS, PMAX, PMIN
 except ImportError as exc:  # pragma: no cover - dependency availability varies by env
     _PYPOWER_IMPORT_ERROR = exc
@@ -51,6 +52,29 @@ def _as_numpy(value):
 class JCCDCOPFProblem(StateBackedParametricProblemBase):
     """Joint chance-constrained DC optimal power flow problem."""
 
+    _RUNTIME_TENSOR_ATTRS = (
+        "cost_c2",
+        "cost_c1",
+        "P_min",
+        "P_max",
+        "P_demand_nominal",
+        "S_max",
+        "theta_min",
+        "theta_max",
+        "B_bus_reduced",
+        "B_line_reduced",
+        "demand_scenarios",
+        "B_bus_reduced_inv_tensor",
+        "B_bus_tensor",
+        "B_line_tensor",
+        "cost_c2_slack",
+        "cost_c1_slack",
+        "P_slack_min",
+        "P_slack_max",
+        "gen_to_bus_reduced_matrix",
+        "demand_reduced_base",
+    )
+
     def __init__(self, num_bus=30, config=None):
         _require_powerflow_dependencies()
         self.device = torch.device("cpu")
@@ -71,6 +95,10 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         self._setup_matrices()
         self._setup_constraints()
         self._generate_scenarios()
+        # Keep the public problem contract usable immediately after construction:
+        # objective/constraint methods operate on tensors, not the raw NumPy
+        # arrays used only while parsing the MATPOWER case.
+        self.to_device(self.device)
         self.is_parametric = True
 
     @staticmethod
@@ -98,12 +126,28 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         self.ineq_cons = range(self.ncon)
         self.eq_cons = None
 
+        self.bus_ids = np.asarray(self.bus[:, BUS_I], dtype=int)
+        self.bus_id_to_idx = {int(bus_id): idx for idx, bus_id in enumerate(self.bus_ids)}
+        if len(self.bus_id_to_idx) != self.n_bus:
+            raise ValueError("MATPOWER case contains duplicate bus IDs.")
         ref_buses = np.where(self.bus[:, BUS_TYPE] == REF)[0]
         self.ref_bus = ref_buses[0] if len(ref_buses) > 0 else 0
+        self.ref_bus_id = int(self.bus_ids[self.ref_bus])
         self.non_slack_idx = np.where(self.bus[:, BUS_TYPE] != REF)[0]
-        self.slack_gen = np.where(self.gen[:, GEN_BUS] == (self.ref_bus + 1))[0][0]
+        slack_generators = np.where(np.asarray(self.gen[:, GEN_BUS], dtype=int) == self.ref_bus_id)[0]
+        if len(slack_generators) == 0:
+            raise ValueError(
+                f"MATPOWER reference bus {self.ref_bus_id} has no associated generator."
+            )
+        self.slack_gen = int(slack_generators[0])
         self.PQ_bus_flag = (self.bus[:, BUS_TYPE] == PQ).astype(int)
-        self.gen_bus = self.gen[:, GEN_BUS].astype(int) - 1
+        try:
+            self.gen_bus = np.asarray(
+                [self.bus_id_to_idx[int(bus_id)] for bus_id in self.gen[:, GEN_BUS]],
+                dtype=int,
+            )
+        except KeyError as exc:
+            raise ValueError(f"Generator references unknown MATPOWER bus ID {exc.args[0]}.") from exc
 
         bus_to_angle_idx = []
         angle_idx = 0
@@ -117,9 +161,14 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         self.B_bus = np.zeros((self.n_bus, self.n_bus))
         self.B_line = np.zeros((self.n_branch, self.n_bus))
 
+        self.branch_bus_indices = np.empty((self.n_branch, 2), dtype=int)
         for branch_idx, branch in enumerate(self.branch):
-            from_bus = int(branch[0]) - 1
-            to_bus = int(branch[1]) - 1
+            try:
+                from_bus = self.bus_id_to_idx[int(branch[F_BUS])]
+                to_bus = self.bus_id_to_idx[int(branch[T_BUS])]
+            except KeyError as exc:
+                raise ValueError(f"Branch references unknown MATPOWER bus ID {exc.args[0]}.") from exc
+            self.branch_bus_indices[branch_idx] = (from_bus, to_bus)
             reactance = branch[BR_X]
             susceptance = 1.0 / reactance if reactance != 0 else 1000.0
             self.B_bus[from_bus, from_bus] += susceptance
@@ -216,37 +265,26 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         bound.config = {**self.config, "n_scenarios": bound.n_scenarios}
         return bound
 
-    def to_device(self, device):
-        device = torch.device(device)
-        tensor_attrs = [
-            "cost_c2",
-            "cost_c1",
-            "P_min",
-            "P_max",
-            "P_demand_nominal",
-            "S_max",
-            "theta_min",
-            "theta_max",
-            "B_bus_reduced",
-            "B_line_reduced",
-            "demand_scenarios",
-        ]
-        for attr_name in tensor_attrs:
+    def _set_runtime(self, *, device, dtype):
+        for attr_name in self._RUNTIME_TENSOR_ATTRS:
             if hasattr(self, attr_name):
-                setattr(self, attr_name, _as_tensor(getattr(self, attr_name), device=device, dtype=self.dtype))
-        self.B_bus_reduced_inv_tensor = self.B_bus_reduced_inv_tensor.to(device=device, dtype=self.dtype)
-        self.B_bus_tensor = self.B_bus_tensor.to(device=device, dtype=self.dtype)
-        self.B_line_tensor = self.B_line_tensor.to(device=device, dtype=self.dtype)
-        self.cost_c2_slack = _as_tensor(self.cost_c2_slack, device=device, dtype=self.dtype)
-        self.cost_c1_slack = _as_tensor(self.cost_c1_slack, device=device, dtype=self.dtype)
-        self.P_slack_min = _as_tensor(self.P_slack_min, device=device, dtype=self.dtype)
-        self.P_slack_max = _as_tensor(self.P_slack_max, device=device, dtype=self.dtype)
-        self.device = device
-        if hasattr(self, "gen_to_bus_reduced_matrix"):
-            self.gen_to_bus_reduced_matrix = self.gen_to_bus_reduced_matrix.to(device=device, dtype=self.dtype)
-        if hasattr(self, "demand_reduced_base"):
-            self.demand_reduced_base = self.demand_reduced_base.to(device=device, dtype=self.dtype)
+                setattr(
+                    self,
+                    attr_name,
+                    _as_tensor(getattr(self, attr_name), device=device, dtype=dtype),
+                )
+        self.device = torch.device(device)
+        self.dtype = dtype
         return self
+
+    def to_device(self, device):
+        return self._set_runtime(device=torch.device(device), dtype=self.dtype)
+
+    def to_dtype(self, dtype):
+        return self._set_runtime(
+            device=self.device,
+            dtype=resolve_torch_dtype(dtype, default=torch.float32),
+        )
 
     def _precompute_mapping_matrices(self):
         matrix = np.zeros((self.n_bus - 1, self.n_gen_vars))
@@ -370,9 +408,8 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
 
     def constraint_x(self, x, clip=True):
         scenario_feasible = self.compute_scenario_feasibility(x)
-        prob_satisfied = scenario_feasible.mean(dim=1, keepdim=True)
-        chance_violation = 1 - prob_satisfied
-        return torch.clamp(chance_violation, min=0) if clip else chance_violation
+        constraint = 1.0 - scenario_feasible.mean(dim=1, keepdim=True)
+        return torch.clamp(constraint, min=0) if clip else constraint
 
     def constraint_residual_xy(self, input_params, y, clip=True):
         scenario_batch = self._coerce_scenario_batch(
@@ -384,9 +421,8 @@ class JCCDCOPFProblem(StateBackedParametricProblemBase):
         if scenario_batch is None:
             return self.constraint_x(y, clip=clip)
         scenario_feasible = self.compute_scenario_feasibility(y, scenario_batch=scenario_batch)
-        prob_satisfied = scenario_feasible.mean(dim=1, keepdim=True)
-        chance_violation = 1 - prob_satisfied
-        return torch.clamp(chance_violation, min=0) if clip else chance_violation
+        constraint = 1.0 - scenario_feasible.mean(dim=1, keepdim=True)
+        return torch.clamp(constraint, min=0) if clip else constraint
 
     def gradient_penalty_x(self, x):
         resid = 0.5 * self.robust_constraint_x(x, clip=True) ** 2

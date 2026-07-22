@@ -119,7 +119,12 @@ def _run_jcc_solver_suite(
 class _JCCINNPGDAdapter:
     """Adapter exposing the shared INN-PGD training contract for JCC-DC-OPF."""
 
+    # The INN training penalty remains a smooth scenario-wise surrogate, but
+    # optimizer repair and bisection must enforce the actual sampled chance
+    # constraint used for final comparison.
     training_constraint_surrogate = "scenario_max_residual_v1"
+    bisection_feasibility_metric = "sampled_chance_constraint_v1"
+    final_evaluation_metric = "sampled_chance_feasibility_rate_v1"
 
     def __init__(self, problem):
         self.problem = problem
@@ -177,10 +182,19 @@ class _JCCINNPGDAdapter:
         return torch.cat(scenario_max_residuals, dim=1)
 
     def chance_violation(self, input_batch, x, clip=True):
-        return self.problem.constraint_residual_xy(input_batch, x, clip=clip)
+        scenario_batch = self.problem._coerce_scenario_batch(
+            input_batch,
+            x.device,
+            batch_size=x.shape[0],
+            dtype=x.dtype,
+        )
+        scenario_feasibility = self.problem.compute_scenario_feasibility(x, scenario_batch=scenario_batch)
+        feasibility_rate = scenario_feasibility.mean(dim=1, keepdim=True)
+        residual = (1.0 - float(self.problem.config["epsilon"])) - feasibility_rate
+        return torch.clamp(residual, min=0) if clip else residual
 
     def check_feasibility(self, input_batch, x):
-        return self.ineq_resid(input_batch, x, clip=True)
+        return self.chance_violation(input_batch, x, clip=True)
 
     def violations(self, input_batch, x):
         return self.chance_violation(input_batch, x, clip=True)
@@ -189,7 +203,12 @@ class _JCCINNPGDAdapter:
         return self.problem.objective_x(x)
 
     def training_record_metadata(self):
-        return {"constraint_surrogate": self.training_constraint_surrogate}
+        return {
+            "constraint_surrogate": self.training_constraint_surrogate,
+            "bisection_feasibility_metric": self.bisection_feasibility_metric,
+            "final_evaluation_metric": self.final_evaluation_metric,
+            "chance_epsilon": float(self.problem.config["epsilon"]),
+        }
 
 
 def _reject_jcc_model_training_keys(config, *, context):
@@ -297,7 +316,13 @@ def _run_jcc_inn_pgd_variant(
     model_path = training_resource["model_path"]
     record_path = training_resource["record_path"]
     expected_surrogate = getattr(adapter, "training_constraint_surrogate", None)
-    if (not retrain) and expected_surrogate is not None and training_record.get("constraint_surrogate") != expected_surrogate:
+    recorded_surrogate = training_record.get("constraint_surrogate")
+    if (
+        (not retrain)
+        and expected_surrogate is not None
+        and recorded_surrogate is not None
+        and recorded_surrogate != expected_surrogate
+    ):
         print(
             "[HomOPT] Ignoring stale JCC INN checkpoint: "
             "training constraint surrogate changed; retraining."
@@ -342,13 +367,21 @@ def _run_jcc_inn_pgd_variant(
     finite_violation = bool(torch.isfinite(final_violation_tensor).all().item())
     final_objective = float(final_objective_tensor.mean().item()) if finite_objective else None
     final_violation = float(final_violation_tensor.max().item()) if finite_violation else None
+    chance_epsilon = float(problem.config["epsilon"])
+    per_instance_chance_feasibility_rates = None
+    worst_instance_chance_feasibility_rate = 0.0
     with torch.inference_mode():
         if finite_solution:
             scenario_feasibility = problem.compute_scenario_feasibility(x_opt, scenario_batch=inputs)
-            chance_feasibility_rate = float(scenario_feasibility.mean().item())
+            per_instance_rates = scenario_feasibility.mean(dim=1)
+            per_instance_chance_feasibility_rates = per_instance_rates.detach().cpu().tolist()
+            chance_feasibility_rate = float(per_instance_rates.mean().item())
+            worst_instance_chance_feasibility_rate = float(per_instance_rates.min().item())
+            chance_violation = torch.clamp((1.0 - chance_epsilon) - per_instance_rates, min=0)
+            violation = float(chance_violation.max().item())
         else:
             chance_feasibility_rate = 0.0
-        violation = max(0.0, (1.0 - chance_feasibility_rate) - float(problem.config["epsilon"]))
+            violation = 1.0 - chance_epsilon
     status = "completed" if finite_solution and finite_objective and finite_violation else "failed_nonfinite"
     nonfinite_reason = None
     if status != "completed":
@@ -369,8 +402,14 @@ def _run_jcc_inn_pgd_variant(
         "final_objective": final_objective,
         "final_violation": final_violation,
         "chance_feasibility_rate": chance_feasibility_rate,
+        "per_instance_chance_feasibility_rates": per_instance_chance_feasibility_rates,
+        "worst_instance_chance_feasibility_rate": worst_instance_chance_feasibility_rate,
         "violation": violation,
         "feasible": status == "completed" and violation <= 1e-12,
+        "training_constraint_surrogate": getattr(adapter, "training_constraint_surrogate", None),
+        "bisection_feasibility_metric": getattr(adapter, "bisection_feasibility_metric", None),
+        "final_evaluation_metric": getattr(adapter, "final_evaluation_metric", None),
+        "chance_epsilon": chance_epsilon,
         "status": status,
         "failure_reason": nonfinite_reason,
         "decision_trajectory": decision_traj.detach().cpu().numpy() if hasattr(decision_traj, "detach") else [],

@@ -44,6 +44,12 @@ class EqualityConstrainedALMOptimizer(BaseOptimizer):
         self.check_outer_objective_change = bool(params.get("check_outer_objective_change", True))
         self.verbose_interval = int(params.get("verbose_interval", 50))
         self.opt_type = params.get("opt_type", "ALM-EQ")
+        # The equality baselines delegate their primal subproblem to CVXPY.
+        # Keep those controls on the optimizer instance so every outer
+        # iteration receives the same explicit solver contract.
+        self.solver_options = dict(params.get("solver_options") or {})
+        self.subproblem_time_limit_sec = params.get("subproblem_time_limit_sec")
+        self.solver_verbose = bool(params.get("solver_verbose", False))
 
     def _eq_violation(self, x):
         residual = _constraint_residual(self.problem, x, equality_only=True)
@@ -62,6 +68,9 @@ class EqualityConstrainedALMOptimizer(BaseOptimizer):
             "use_penalty": self.use_penalty,
             "use_proximal": self.use_proximal,
             "proximal_coef": self.proximal_coef,
+            "solver_options": dict(self.solver_options),
+            "time_limit_sec": self.subproblem_time_limit_sec,
+            "verbose": self.solver_verbose,
         }
         result = solve_exact_result(solver, solve_config=solve_config)
         solution = _extract_exact_solution(result)

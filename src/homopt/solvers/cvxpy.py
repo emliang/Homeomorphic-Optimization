@@ -80,15 +80,31 @@ def _solver_name_text(solver_name):
     return str(solver_name)
 
 
+def _normalize_preferred_solver(preferred_solver):
+    """Return a canonical explicit solver request, or ``None`` for auto.
+
+    ``auto`` is the only request that permits the project priority/fallback
+    chain.  Any other value is an explicit user choice and is consequently
+    tried alone.
+    """
+
+    if preferred_solver is None:
+        return None
+    solver_name = _solver_name_text(preferred_solver).strip()
+    if not solver_name or solver_name.lower() == "auto":
+        return None
+    return solver_name.upper()
+
+
 def _candidate_cvxpy_solvers_for_request(cp_mod, solver_priority, preferred_solver=None):
+    preferred_solver = _normalize_preferred_solver(preferred_solver)
     if preferred_solver is None:
         return _candidate_cvxpy_solvers(cp_mod, solver_priority=solver_priority)
-    solver_name = _solver_name_text(preferred_solver)
     try:
         installed = set(cp_mod.installed_solvers())
     except Exception:
         installed = set()
-    return [solver_name] if solver_name in installed else []
+    return [preferred_solver] if preferred_solver in installed else []
 
 
 def _start_gurobi_env(*, verbose, solver_options):
@@ -122,16 +138,19 @@ def _solve_cvxpy_problem(
     solver_priority=CVXPY_SOLVER_PRIORITY,
     preferred_solver=None,
 ):
+    requested_solver = _normalize_preferred_solver(preferred_solver)
     candidates = _candidate_cvxpy_solvers_for_request(
         cp_mod,
         solver_priority=solver_priority,
-        preferred_solver=preferred_solver,
+        preferred_solver=requested_solver,
     )
     last_error = None
+    attempted_solvers = []
     for solver_name in candidates:
         solver = getattr(cp_mod, solver_name, None)
         if solver is None:
             continue
+        attempted_solvers.append(_solver_name_text(solver_name))
         call_solver_options = dict(solver_options or {})
         gurobi_env = None
         if _solver_name_text(solver_name).upper() == "GUROBI":
@@ -162,7 +181,14 @@ def _solve_cvxpy_problem(
             )
         try:
             problem.solve(**kwargs)
-            return
+            return {
+                "solver_requested": requested_solver or "auto",
+                "solver_used": _solver_name_text(solver_name),
+                "solver_attempts": attempted_solvers,
+                "solver_fallback_used": requested_solver is None and len(attempted_solvers) > 1,
+                "solver_candidates": [_solver_name_text(candidate) for candidate in candidates],
+                "cvxpy_status": getattr(problem, "status", None),
+            }
         except Exception as exc:
             last_error = exc
         finally:
@@ -172,7 +198,7 @@ def _solve_cvxpy_problem(
         raise last_error
     raise RuntimeError(
         "No supported CVXPY solver is installed. Expected one of: "
-        f"{_solver_name_text(preferred_solver) if preferred_solver is not None else ', '.join(solver_priority)}"
+        f"{requested_solver if requested_solver is not None else ', '.join(solver_priority)}"
     )
 
 

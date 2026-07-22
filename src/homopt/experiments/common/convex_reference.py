@@ -185,8 +185,111 @@ def _approximate_chebyshev_origin(
     return best_x.view(-1).detach().cpu().numpy()
 
 
+# Solver request controls are part of the cache key below, so older entries
+# naturally miss rather than being reused under the new provenance contract.
 _CONVEX_REFERENCE_CACHE_VERSION = 1
 _CONVEX_REFERENCE_CACHE_FILENAME = "convex_reference_context_cache.npy"
+_CVXPY_BACKEND_LABELS = {
+    "CLARABEL",
+    "CVXOPT",
+    "ECOS",
+    "GUROBI",
+    "MOSEK",
+    "OSQP",
+    "SCS",
+}
+
+
+def normalize_convex_reference_solver(value):
+    """Normalize the public convex reference solver request.
+
+    ``auto`` is deliberately distinct from a named backend: auto may follow
+    the CVXPY priority/fallback chain, while a named backend is passed through
+    as an explicit no-fallback request.
+    """
+
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() == "auto":
+        return None
+    return normalized.upper()
+
+
+def _reference_solver_request_label(reference_solver):
+    return "auto" if reference_solver is None else str(reference_solver)
+
+
+def _reference_solve_kwargs(
+    *,
+    reference_solver,
+    reference_solver_options,
+    reference_solver_time_limit_sec,
+    reference_solver_verbose,
+):
+    kwargs = {}
+    if reference_solver is not None:
+        kwargs["solver_name"] = reference_solver
+    if reference_solver_options is not None:
+        kwargs["solver_options"] = dict(reference_solver_options)
+    if reference_solver_time_limit_sec is not None:
+        kwargs["time_limit_sec"] = float(reference_solver_time_limit_sec)
+    if reference_solver_verbose:
+        kwargs["verbose"] = True
+    return kwargs
+
+
+def _reference_solver_provenance(result, *, reference_solver):
+    extras = result.get("extras") if isinstance(result, dict) else None
+    extras = extras if isinstance(extras, dict) else {}
+    solver_used = extras.get("solver_used")
+    if solver_used is not None:
+        solver_used = str(solver_used)
+    attempts = extras.get("solver_attempts")
+    if attempts is not None:
+        attempts = [str(item) for item in attempts]
+    fallback_used = extras.get("solver_fallback_used")
+    if fallback_used is not None:
+        fallback_used = bool(fallback_used)
+    return {
+        "solver_requested": str(extras.get("solver_requested") or _reference_solver_request_label(reference_solver)),
+        "solver_used": solver_used,
+        "solver_attempts": attempts,
+        "solver_fallback_used": fallback_used,
+        "solver_candidates": extras.get("solver_candidates"),
+        "cvxpy_status": extras.get("cvxpy_status"),
+        "solve_status": result.get("status") if isinstance(result, dict) else None,
+    }
+
+
+def _require_reference_solution(result, *, solve_type, reference_solver):
+    """Fail at the reference boundary instead of continuing with ``None``."""
+
+    status = result.get("status") if isinstance(result, dict) else None
+    solution = result.get("solution") if isinstance(result, dict) else None
+    if solution is not None and status not in {"error", "failed"}:
+        return result
+    extras = result.get("extras") if isinstance(result, dict) else None
+    extras = extras if isinstance(extras, dict) else {}
+    requested = extras.get("solver_requested") or _reference_solver_request_label(reference_solver)
+    detail = extras.get("error")
+    message = f"Convex reference solve {solve_type!r} failed for solver request {requested!r}."
+    if detail:
+        message = f"{message} Backend error: {detail}"
+    raise RuntimeError(message)
+
+
+def resolve_convex_reference_label(reference_label, solver_provenance):
+    """Choose a display label without attributing a fallback solve to MOSEK."""
+
+    solver_used = (solver_provenance or {}).get("solver_used")
+    if reference_label is None or not str(reference_label).strip():
+        return solver_used or "ConvexSolver"
+    label = str(reference_label)
+    if solver_used is not None and label.upper() in _CVXPY_BACKEND_LABELS:
+        if label.upper() != str(solver_used).upper():
+            return str(solver_used)
+    return label
 
 
 def _hash_reference_value(hasher, value):
@@ -211,7 +314,19 @@ def _hash_reference_value(hasher, value):
         hasher.update(repr(value).encode("utf-8"))
 
 
-def _reference_cache_key(problem, *, ip_mode, ip_eps, hom_origin_constraints, hom_origin, include_equality):
+def _reference_cache_key(
+    problem,
+    *,
+    ip_mode,
+    ip_eps,
+    hom_origin_constraints,
+    hom_origin,
+    include_equality,
+    reference_solver,
+    reference_solver_options,
+    reference_solver_time_limit_sec,
+    reference_solver_verbose,
+):
     hasher = hashlib.sha256()
     hasher.update(f"version:{_CONVEX_REFERENCE_CACHE_VERSION}".encode("utf-8"))
     _hash_reference_value(hasher, getattr(problem, "prob_para", {}))
@@ -223,6 +338,10 @@ def _reference_cache_key(problem, *, ip_mode, ip_eps, hom_origin_constraints, ho
             "hom_origin_constraints": str(hom_origin_constraints),
             "hom_origin": None if hom_origin is None else np.asarray(hom_origin, dtype=float).reshape(-1),
             "include_equality": bool(include_equality),
+            "reference_solver": _reference_solver_request_label(reference_solver),
+            "reference_solver_options": reference_solver_options,
+            "reference_solver_time_limit_sec": reference_solver_time_limit_sec,
+            "reference_solver_verbose": bool(reference_solver_verbose),
         },
     )
     return hasher.hexdigest()
@@ -272,7 +391,18 @@ def _save_reference_cache(cache_path, cache_key, payload):
     temporary.replace(cache_path)
 
 
-def _cache_payload(*, x_opt, objective_opt, solver_violation, solver_time, x_origin, ip_solver_time, origin_method):
+def _cache_payload(
+    *,
+    x_opt,
+    objective_opt,
+    solver_violation,
+    solver_time,
+    opt_solver_provenance,
+    x_origin,
+    ip_solver_time,
+    origin_method,
+    origin_solver_provenance,
+):
     payload = {"origin_method": origin_method}
     if x_opt is not None:
         payload.update(
@@ -281,11 +411,16 @@ def _cache_payload(*, x_opt, objective_opt, solver_violation, solver_time, x_ori
                 "objective_opt": objective_opt,
                 "solver_violation": solver_violation,
                 "solver_time": solver_time,
+                "opt_solver_provenance": copy.deepcopy(opt_solver_provenance),
             }
         )
     if x_origin is not None:
         payload.update(
-            {"x_origin": np.asarray(x_origin, dtype=float).reshape(-1), "ip_solver_time": ip_solver_time}
+            {
+                "x_origin": np.asarray(x_origin, dtype=float).reshape(-1),
+                "ip_solver_time": ip_solver_time,
+                "origin_solver_provenance": copy.deepcopy(origin_solver_provenance),
+            }
         )
     return payload
 
@@ -305,11 +440,26 @@ def prepare_convex_reference_context(
     ip_eps=1e-3,
     hom_origin_constraints="full",
     hom_origin=None,
+    reference_solver="auto",
+    reference_solver_options=None,
+    reference_solver_time_limit_sec=None,
+    reference_solver_verbose=False,
+    reference_label=None,
     output_dir=None,
     cache_reference=True,
 ):
     hom_origin_constraints = normalize_hom_origin_constraints(hom_origin_constraints)
     include_equality = hom_origin_constraints == "full"
+    reference_solver = normalize_convex_reference_solver(reference_solver)
+    reference_solver_options = (
+        None if reference_solver_options is None else dict(reference_solver_options)
+    )
+    reference_solve_kwargs = _reference_solve_kwargs(
+        reference_solver=reference_solver,
+        reference_solver_options=reference_solver_options,
+        reference_solver_time_limit_sec=reference_solver_time_limit_sec,
+        reference_solver_verbose=reference_solver_verbose,
+    )
     solver = ConvexSolver(problem.prob_para)
     cache_path = _reference_cache_path(output_dir) if cache_reference else None
     cache_key = _reference_cache_key(
@@ -319,6 +469,10 @@ def prepare_convex_reference_context(
         hom_origin_constraints=hom_origin_constraints,
         hom_origin=hom_origin,
         include_equality=include_equality,
+        reference_solver=reference_solver,
+        reference_solver_options=reference_solver_options,
+        reference_solver_time_limit_sec=reference_solver_time_limit_sec,
+        reference_solver_verbose=reference_solver_verbose,
     )
     cached, cache_load_time = _load_reference_cache(cache_path, cache_key)
     cached = cached or {}
@@ -327,20 +481,32 @@ def prepare_convex_reference_context(
     cached_solver_time = cached_ip_solver_time = None
 
     x_opt = objective_opt = solver_violation = solver_time = None
+    opt_solver_provenance = None
+    origin_solver_provenance = None
     if need_opt:
         if "x_opt" in cached:
             x_opt = np.asarray(cached["x_opt"], dtype=float).reshape(-1)
             objective_opt = cached.get("objective_opt")
             solver_violation = cached.get("solver_violation")
+            opt_solver_provenance = copy.deepcopy(cached.get("opt_solver_provenance"))
             cached_solver_time = cached.get("solver_time")
             solver_time = 0.0
             cache_hit = True
         else:
-            result = solve_exact_result(solver, "opt")
+            result = solve_exact_result(solver, "opt", **reference_solve_kwargs)
+            result = _require_reference_solution(
+                result,
+                solve_type="opt",
+                reference_solver=reference_solver,
+            )
             x_opt = result["solution"]
             solver_time = result["runtime_total"]
             objective_opt = None if result["objective"] is None else float(result["objective"])
             solver_violation = None if result["violation"] is None else float(result["violation"])
+            opt_solver_provenance = _reference_solver_provenance(
+                result,
+                reference_solver=reference_solver,
+            )
             cached_solver_time = solver_time
             cache_dirty = True
 
@@ -352,16 +518,45 @@ def prepare_convex_reference_context(
     elif "x_origin" in cached:
         x_origin = np.asarray(cached["x_origin"], dtype=float).reshape(-1)
         origin_method = cached.get("origin_method", origin_method)
+        origin_solver_provenance = copy.deepcopy(cached.get("origin_solver_provenance"))
         cached_ip_solver_time = cached.get("ip_solver_time")
         ip_solver_time = 0.0
         cache_hit = True
     elif ip_mode == "central_ip":
-        result = solve_exact_result(solver, "central_ip", equality=include_equality)
+        result = solve_exact_result(
+            solver,
+            "central_ip",
+            equality=include_equality,
+            **reference_solve_kwargs,
+        )
+        result = _require_reference_solution(
+            result,
+            solve_type="central_ip",
+            reference_solver=reference_solver,
+        )
         x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        origin_solver_provenance = _reference_solver_provenance(
+            result,
+            reference_solver=reference_solver,
+        )
         cached_ip_solver_time, cache_dirty = ip_solver_time, True
     elif ip_mode == "geometric_central_ip":
-        result = solve_exact_result(solver, "geometric_central_ip", equality=include_equality)
+        result = solve_exact_result(
+            solver,
+            "geometric_central_ip",
+            equality=include_equality,
+            **reference_solve_kwargs,
+        )
+        result = _require_reference_solution(
+            result,
+            solve_type="geometric_central_ip",
+            reference_solver=reference_solver,
+        )
         x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        origin_solver_provenance = _reference_solver_provenance(
+            result,
+            reference_solver=reference_solver,
+        )
         cached_ip_solver_time, cache_dirty = ip_solver_time, True
     elif str(ip_mode).lower() in {"chebyshev", "chebyshev_approx", "approx_chebyshev"}:
         start = perf_counter()
@@ -370,8 +565,23 @@ def prepare_convex_reference_context(
         origin_method = "chebyshev_approx"
         cached_ip_solver_time, cache_dirty = ip_solver_time, True
     else:
-        result = solve_exact_result(solver, "ip", eps=ip_eps, equality=include_equality)
+        result = solve_exact_result(
+            solver,
+            "ip",
+            eps=ip_eps,
+            equality=include_equality,
+            **reference_solve_kwargs,
+        )
+        result = _require_reference_solution(
+            result,
+            solve_type="ip",
+            reference_solver=reference_solver,
+        )
         x_origin, ip_solver_time = result["solution"], result["runtime_total"]
+        origin_solver_provenance = _reference_solver_provenance(
+            result,
+            reference_solver=reference_solver,
+        )
         cached_ip_solver_time, cache_dirty = ip_solver_time, True
 
     if cache_dirty and cache_path is not None:
@@ -382,9 +592,17 @@ def prepare_convex_reference_context(
                 objective_opt=objective_opt,
                 solver_violation=solver_violation,
                 solver_time=cached_solver_time if need_opt else cached.get("solver_time"),
+                opt_solver_provenance=(
+                    opt_solver_provenance if need_opt else cached.get("opt_solver_provenance")
+                ),
                 x_origin=x_origin if hom_origin is None else cached.get("x_origin"),
                 ip_solver_time=cached_ip_solver_time if hom_origin is None else cached.get("ip_solver_time"),
                 origin_method=origin_method if hom_origin is None else cached.get("origin_method", origin_method),
+                origin_solver_provenance=(
+                    origin_solver_provenance
+                    if hom_origin is None
+                    else cached.get("origin_solver_provenance")
+                ),
             )
         )
         _save_reference_cache(cache_path, cache_key, next_payload)
@@ -399,6 +617,10 @@ def prepare_convex_reference_context(
         hom_map_explicit_gradient_rule=hom_map_explicit_gradient_rule,
         hom_map_smooth_tie_tol=hom_map_smooth_tie_tol,
         hom_map_smooth_temperature=hom_map_smooth_temperature,
+    )
+    reference_label_effective = resolve_convex_reference_label(
+        reference_label,
+        opt_solver_provenance,
     )
     return {
         "x_opt": x_opt,
@@ -417,6 +639,14 @@ def prepare_convex_reference_context(
         "reference_cache_load_time": cache_load_time,
         "cached_solver_time": cached_solver_time,
         "cached_ip_solver_time": cached_ip_solver_time,
+        "reference_label": reference_label_effective,
+        "reference_label_requested": reference_label,
+        "reference_solver_requested": _reference_solver_request_label(reference_solver),
+        "reference_solver_used": (opt_solver_provenance or {}).get("solver_used"),
+        "reference_solver_attempts": (opt_solver_provenance or {}).get("solver_attempts"),
+        "reference_solver_fallback_used": (opt_solver_provenance or {}).get("solver_fallback_used"),
+        "reference_solver_provenance": opt_solver_provenance,
+        "reference_origin_solver_provenance": origin_solver_provenance,
     }
 
 
@@ -425,6 +655,8 @@ __all__ = [
     "build_convex_problem",
     "build_convex_problem_config",
     "normalize_convex_problem_type",
+    "normalize_convex_reference_solver",
     "normalize_hom_origin_constraints",
     "prepare_convex_reference_context",
+    "resolve_convex_reference_label",
 ]

@@ -281,6 +281,14 @@ def summarize_comparison_rows_by_method(rows):
             "runtime_total": sum(runtimes),
             "num_instances": len(method_rows),
         }
+        chance_rates = [
+            float(row["chance_feasibility_rate"])
+            for row in method_rows
+            if row.get("chance_feasibility_rate") is not None
+        ]
+        if chance_rates:
+            summary["chance_feasibility_rate_mean"] = sum(chance_rates) / len(chance_rates)
+            summary["chance_feasibility_rate_min"] = min(chance_rates)
         for key in SUMMARY_TIMING_MEAN_FIELDS:
             values = [float(row[key]) for row in method_rows if row.get(key) is not None]
             if values:

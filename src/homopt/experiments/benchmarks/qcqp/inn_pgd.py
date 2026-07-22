@@ -509,6 +509,21 @@ def qcqp_inn_comparison(
         records=comparison_records,
         summaries=comparison_summaries,
         algorithm_order=[QCQP_INN_METHOD_NAME, *normalize_inn_lagrangian_baselines(lagrangian_baselines)],
+        run_identity={
+            "benchmark": "qcqp_inn_comparison",
+            "seed": seed,
+            "problem_config": problem_args,
+            "model_config": case_context["model_args"],
+            "training_config": case_context["train_args"],
+            "optimizer_config": optimizer_args,
+            "max_iterations": max_iterations,
+            "lagrangian_baseline_config": lagrangian_baseline_config,
+            "runtime": {"device": str(runtime_device), "dtype": str(runtime_dtype)},
+            "test_instances": {
+                "inputs": instance_batch.inputs,
+                "objectives": instance_batch.objectives,
+            },
+        },
         manifest_metadata={
             "problem": "qcqp_inn",
             "n_var": n_var,

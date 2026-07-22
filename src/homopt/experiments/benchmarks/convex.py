@@ -168,6 +168,13 @@ def socp_hompgd_benchmark(
         records=records,
         summaries=summaries,
         algorithm_order=records.keys(),
+        run_identity={
+            "benchmark": "socp_hompgd_benchmark",
+            "problem_type": "socp",
+            "problem_config": config,
+            "common_config": params["common"],
+            "runtime": {"device": str(runtime_device), "dtype": str(runtime_dtype)},
+        },
     )
 
     return build_benchmark_payload(
@@ -246,6 +253,10 @@ def convex_algorithm_comparison(
     include_reference_solver=None,
     reference_need_opt=True,
     reference_cache=True,
+    reference_solver="auto",
+    reference_solver_options=None,
+    reference_solver_time_limit_sec=None,
+    reference_solver_verbose=False,
     hom_origin_constraints="full",
     hom_origin_ip_mode="ip",
     hom_origin_ip_eps=1e-3,
@@ -258,7 +269,7 @@ def convex_algorithm_comparison(
     visualization_prefix=None,
     plot_algorithm_order=None,
     method_labels=None,
-    reference_label="MOSEK",
+    reference_label=None,
     show_convergence_legend=True,
     scale_label=None,
 ):
@@ -461,6 +472,11 @@ def convex_algorithm_comparison(
         previous_algorithms = visual_state["stored_algorithms"]
         artifacts = visual_state["artifacts"]
         if effective_visualize and output_dir is not None:
+            visual_reference_label = (
+                previous_metrics.get("reference_label")
+                or reference_label
+                or "ConvexSolver"
+            )
             artifacts.update(
                 save_comparison_visualizations(
                     problem=problem,
@@ -469,7 +485,7 @@ def convex_algorithm_comparison(
                     output_dir=output_dir,
                     prefix=effective_visualization_prefix,
                     reference_objective=previous_metrics.get("reference_objective"),
-                    reference_label=reference_label,
+                    reference_label=visual_reference_label,
                     method_labels=method_labels,
                     violation_y_min=float(common["convergence_threshold"]),
                     show_convergence_legend=show_convergence_legend,
@@ -502,6 +518,11 @@ def convex_algorithm_comparison(
         ip_eps=hom_origin_ip_eps,
         hom_origin_constraints=hom_origin_constraints,
         hom_origin=hom_origin,
+        reference_solver=reference_solver,
+        reference_solver_options=reference_solver_options,
+        reference_solver_time_limit_sec=reference_solver_time_limit_sec,
+        reference_solver_verbose=reference_solver_verbose,
+        reference_label=reference_label,
         output_dir=output_dir,
         cache_reference=reference_cache,
     )
@@ -516,6 +537,9 @@ def convex_algorithm_comparison(
     solver_violation = reference["solver_violation"]
     ip_solver_time = reference["ip_solver_time"]
     origin_method = reference.get("origin_method", str(hom_origin_ip_mode))
+    effective_reference_label = (
+        reference.get("reference_label") or reference_label or "ConvexSolver"
+    )
     init_point = _resolve_single_problem_initial_point(
         problem,
         reference,
@@ -543,10 +567,37 @@ def convex_algorithm_comparison(
         records=records,
         summaries=summaries,
         algorithm_order=algorithms,
+        run_identity={
+            "benchmark": "convex_algorithm_comparison",
+            "problem_type": problem_type,
+            "problem_config": config,
+            "common_config": params["common"],
+            "runtime": {"device": str(runtime_device), "dtype": str(runtime_dtype)},
+            "initialization": {
+                "mode": effective_initial_point_mode,
+                "hom_origin": hom_origin,
+                "hom_origin_constraints": hom_origin_constraints,
+                "hom_origin_ip_mode": hom_origin_ip_mode,
+                "hom_origin_ip_eps": hom_origin_ip_eps,
+            },
+            "reference": {
+                "include_reference_solver": include_reference_solver,
+                "need_opt": reference_need_opt,
+                "label": effective_reference_label,
+                "solver": reference_solver,
+                "solver_options": reference_solver_options,
+                "solver_time_limit_sec": reference_solver_time_limit_sec,
+                "solver_verbose": reference_solver_verbose,
+            },
+        },
         manifest_metadata={
             "problem_type": problem_type,
             "scale_label": scale_label,
-            "reference_label": reference_label,
+            "reference_label": effective_reference_label,
+            "reference_label_requested": reference_label,
+            "reference_solver_requested": reference.get("reference_solver_requested"),
+            "reference_solver_used": reference.get("reference_solver_used"),
+            "reference_solver_provenance": reference.get("reference_solver_provenance"),
             "reference_objective": obj_opt,
         },
     )
@@ -574,7 +625,7 @@ def convex_algorithm_comparison(
                 output_dir=output_dir,
                 prefix=effective_visualization_prefix,
                 reference_objective=obj_opt,
-                reference_label=reference_label,
+                reference_label=effective_reference_label,
                 method_labels=method_labels,
                 violation_y_min=float(common["convergence_threshold"]),
                 show_convergence_legend=show_convergence_legend,
@@ -609,7 +660,14 @@ def convex_algorithm_comparison(
         algorithms=algorithms,
         plot_algorithm_order=plot_algorithm_order,
         method_labels=dict(method_labels or {}),
-        reference_label=reference_label,
+        reference_label=effective_reference_label,
+        reference_label_requested=reference.get("reference_label_requested", reference_label),
+        reference_solver_requested=reference.get("reference_solver_requested"),
+        reference_solver_used=reference.get("reference_solver_used"),
+        reference_solver_attempts=reference.get("reference_solver_attempts"),
+        reference_solver_fallback_used=reference.get("reference_solver_fallback_used"),
+        reference_solver_provenance=reference.get("reference_solver_provenance"),
+        reference_origin_solver_provenance=reference.get("reference_origin_solver_provenance"),
         scale_label=scale_label,
         problem_type=problem_type,
         reference_objective=obj_opt,

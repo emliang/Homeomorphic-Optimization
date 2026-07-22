@@ -32,6 +32,7 @@ class ConvexSolver:
         self.n_qua = self.Qq.shape[0] if self.Qq is not None else 0
         self.n_eq = self.A_eq.shape[0] if self.A_eq is not None else 0
         self.n_vars = len(self.Q)
+        self.last_solve_metadata = None
 
     def _constraint_margin_scales(self):
         """Return static residual scales for a distance-like center margin."""
@@ -180,6 +181,17 @@ class ConvexSolver:
         time_limit_sec=None,
         verbose=False,
     ):
+        requested_solver = (
+            "auto"
+            if solver_name is None or str(solver_name).strip().lower() == "auto"
+            else str(solver_name).upper()
+        )
+        self.last_solve_metadata = {
+            "solver_requested": requested_solver,
+            "solver_used": None,
+            "solver_attempts": [],
+            "solver_fallback_used": False,
+        }
         cp_mod = _require_cvxpy()
         if solve_type in ["opt", "initialized_opt"]:
             decision, constraints = self._create_base_problem(equality=True)
@@ -238,7 +250,7 @@ class ConvexSolver:
             raise ValueError(f"Unknown solve_type: {solve_type}")
 
         problem = cp_mod.Problem(objective, constraints)
-        _solve_cvxpy_problem(
+        self.last_solve_metadata = _solve_cvxpy_problem(
             problem,
             cp_mod,
             warm_start=True,
@@ -316,6 +328,7 @@ class ConvexSolver:
             )
             runtime_total = perf_counter() - start
             violation = self._constraint_violation(solution)
+            solver_metadata = dict(self.last_solve_metadata or {})
             return _normalized_exact_solver_result(
                 solution=solution,
                 status="optimal" if solution is not None else "failed",
@@ -323,13 +336,25 @@ class ConvexSolver:
                 runtime_total=runtime_total,
                 violation=violation,
                 feasible=None if violation is None else violation <= 1e-6,
-                extras={"solve_type": solve_type, "equality": hard_equalities, "hard_equalities": hard_equalities},
+                extras={
+                    "solve_type": solve_type,
+                    "equality": hard_equalities,
+                    "hard_equalities": hard_equalities,
+                    **solver_metadata,
+                },
             )
         except Exception as exc:
+            solver_metadata = dict(self.last_solve_metadata or {})
             return _normalized_exact_solver_result(
                 status="error",
                 runtime_total=perf_counter() - start,
-                extras={"solve_type": solve_type, "equality": hard_equalities, "hard_equalities": hard_equalities, "error": str(exc)},
+                extras={
+                    "solve_type": solve_type,
+                    "equality": hard_equalities,
+                    "hard_equalities": hard_equalities,
+                    **solver_metadata,
+                    "error": str(exc),
+                },
             )
 
 __all__ = ["ConvexSolver"]

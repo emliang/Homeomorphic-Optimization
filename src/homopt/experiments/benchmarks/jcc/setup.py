@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from homopt.experiments.common.config import merged, normalize_jcc_problem_config
 from homopt.problems import JCCDCOPFProblem, bind_singleton_problem_instance
-from homopt.utils import cast_tensors_to_dtype
 
 
 def normalize_jcc_linear_problem_config(
@@ -104,11 +103,10 @@ def _build_jcc_problem(
         seed=seed,
         problem_config=problem_config,
     )
-    problem = JCCDCOPFProblem(num_bus=int(num_bus), config=problem_cfg).to_device(runtime_device)
-    problem = cast_tensors_to_dtype(problem, runtime_dtype)
-    # Runtime-created JCC tensors (e.g. the generator-incidence matrix) must
-    # use the same dtype after this initial cast.
-    problem.dtype = runtime_dtype
+    problem = JCCDCOPFProblem(num_bus=int(num_bus), config=problem_cfg).with_runtime(
+        device=runtime_device,
+        dtype=runtime_dtype,
+    )
     return bind_singleton_problem_instance(problem, seed=seed)
 
 __all__ = [

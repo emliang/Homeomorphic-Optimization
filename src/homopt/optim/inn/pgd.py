@@ -11,9 +11,8 @@ from homopt.models.inn import (
     _forward_with_condition,
     _quadratic_objective,
 )
-from homopt.optim.core.config import _validate_stepsize_rule
+from homopt.optim.core.config import _build_update_backend, _validate_stepsize_rule
 from homopt.optim.core.result import ParametricOptimizerRunResult
-from homopt.optim.core.updates import AdamOptimizer, GDOptimizer
 from homopt.optim.first_order.loop import run_first_order_loop
 
 
@@ -207,9 +206,18 @@ class INNPGDOptimizer:
         self.proj_max_steps = paras.get('proj_max_steps', 20)
         self.proj_step_size = paras.get('step_size', 0.5)
         self.proj_eps = paras.get('proj_eps', 1e-5)
-        self.opt_type = paras.get('opt', 'gd')
+        self.opt_type = str(paras.get('opt', 'gd')).strip().lower()
         self.momentum = paras.get('momentum', 0.0)
+        # Validate the requested optimizer at construction time.  Previously
+        # every value other than exactly ``"gd"`` silently selected Adam.
+        _build_update_backend(self.opt_type, momentum=self.momentum)
         self.stepsize_rule = _validate_stepsize_rule(paras.get('stepsize_rule', 'constant'))
+        self.convergence_metric = paras.get('convergence_metric', 'objective_change')
+        self.objective_change_threshold = paras.get(
+            'objective_change_threshold',
+            self.convergence_threshold,
+        )
+        self.min_iterations = int(paras.get('min_iterations', 1))
 
     def optimize(self, initial_point=None, verbose=False, seed=2025, input_params=None, objective_params=None):
         del seed
@@ -221,10 +229,7 @@ class INNPGDOptimizer:
         input_params = input_params.to(device=self.device, dtype=self.dtype)
         if objective_params is not None:
             objective_params = objective_params.to(device=self.device, dtype=self.dtype)
-        if self.opt_type == 'gd':
-            opt = GDOptimizer(beta1=self.momentum)
-        else:
-            opt = AdamOptimizer()
+        opt = _build_update_backend(self.opt_type, momentum=self.momentum)
         learning_rate = self.learning_rate
         batch_size = input_params.shape[0]
         should_track_traj = self.problem.nvar == 2
@@ -357,6 +362,10 @@ class INNPGDOptimizer:
             progress_disable=not verbose,
             track_decisions=should_track_traj,
             extra_track_names=("latent_trajectory",),
+            convergence_metric=self.convergence_metric,
+            objective_change_threshold=self.objective_change_threshold,
+            min_iterations=self.min_iterations,
+            require_feasible_for_objective_change=True,
         )
         with torch.inference_mode():
             y_opt = _forward_to_full(z)

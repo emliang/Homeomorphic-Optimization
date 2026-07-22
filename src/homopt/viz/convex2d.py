@@ -176,7 +176,7 @@ def save_convex_2d_visualizations(
     if method_labels is None:
         method_labels = (payload or {}).get("method_labels")
     method_labels = dict(method_labels or {})
-    reference_label = reference_label or (payload or {}).get("reference_label", "MOSEK")
+    reference_label = reference_label or (payload or {}).get("reference_label") or "ConvexSolver"
     paths = {
         "trajectory_legend": artifact_dir / f"{prefix}_trajectory_legend.pdf",
         "metric_traces": artifact_dir / f"{prefix}_metric_traces.json",
