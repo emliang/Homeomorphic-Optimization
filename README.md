@@ -121,8 +121,9 @@ experiments cover:
 
 `GaugeMap` is the main map used for convex inequality sets. It maps a latent
 point `z` to a feasible decision by radially scaling from an interior center
-`x0`. Equality constraints are not part of the gauge map; they are handled by
-ALM/PALM-style layers.
+`x0`. 
+<!-- Equality constraints are not part of the gauge map; they are handled by -->
+<!-- ALM/PALM-style layers. -->
 
 The problem object supplies constraint tensors. A missing attribute or `None`
 disables that constraint family.
@@ -271,9 +272,9 @@ it through the homeomorphic projection route, and compare prediction-only,
 projection-refined, and optimization-refined solutions under the same benchmark
 protocol.
 
-Future documentation can add separate pages for Hom-ALM, INN-PGD, learned
-feasible maps, neural prediction plus post-processing, and solver-specific
-reproducibility notes.
+<!-- Future documentation can add separate pages for Hom-ALM, INN-PGD, learned -->
+<!-- feasible maps, neural prediction plus post-processing, and solver-specific -->
+<!-- reproducibility notes. -->
 
 ## Status
 
